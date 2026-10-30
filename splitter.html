@@ -1,0 +1,522 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bluesky Splitter</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1d2329; --muted: #6b7682;
+    --border: #d9dee3; --accent: #0a7aff; --warn: #d93025;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #15191e; --panel: #1e242b; --text: #e6e9ec; --muted: #8b96a1;
+      --border: #333c46; --accent: #4fa3ff; --warn: #ff6b5e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, sans-serif;
+    height: 100vh; display: flex; flex-direction: column;
+  }
+  header { padding: 18px 20px 16px; border-bottom: 1px solid var(--border); }
+  h1 { margin: 0; font-size: 20px; }
+  header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
+  header a { color: var(--accent); }
+  main {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
+    padding: 16px 20px 20px; flex: 1; min-height: 0;
+  }
+  @media (max-width: 760px) {
+    body { height: auto; }
+    main { grid-template-columns: 1fr; }
+    textarea { min-height: 40vh; }
+  }
+  .col { display: flex; flex-direction: column; min-height: 0; }
+  .col-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 13px; color: var(--muted); margin-bottom: 6px;
+  }
+  textarea {
+    flex: 1; width: 100%; resize: none; padding: 12px;
+    border: 1px solid var(--border); border-radius: 8px;
+    background: var(--panel); color: var(--text); font: inherit;
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  #posts { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .post {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px;
+  }
+  .post-text { white-space: pre-wrap; word-wrap: break-word; }
+  .post-foot {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 8px; font-size: 12px; color: var(--muted);
+  }
+  .post-foot .over { color: var(--warn); font-weight: 600; }
+  button {
+    font: inherit; font-size: 12px; padding: 4px 10px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: transparent; color: var(--accent);
+  }
+  button:hover { border-color: var(--accent); }
+  .empty { color: var(--muted); font-size: 14px; padding: 12px 0; }
+  .account { display: flex; gap: 6px; flex-wrap: wrap; }
+  .thread-head { margin-top: 18px; }
+  .remember { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); }
+  .account > input {
+    flex: 1; min-width: 140px; padding: 6px 8px; font: inherit; font-size: 13px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--panel); color: var(--text);
+  }
+  .actions { display: flex; gap: 10px; align-items: center; }
+  .actions a { color: var(--accent); }
+  .err { color: var(--warn); }
+  .ok { color: var(--accent); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .post.drag { outline: 2px dashed var(--accent); }
+  .thumbs { display: flex; flex-wrap: wrap; gap: 8px; }
+  .thumbs:not(:empty) { margin-top: 8px; }
+  .thumb { width: 110px; position: relative; }
+  .thumb img { width: 100%; height: 80px; object-fit: cover; border-radius: 6px; display: block; }
+  .thumb input {
+    width: 100%; margin-top: 4px; padding: 3px 5px; font: inherit; font-size: 11px;
+    border: 1px solid var(--border); border-radius: 4px; background: var(--panel); color: var(--text);
+  }
+  .thumb .remove {
+    position: absolute; top: 4px; right: 4px; padding: 0 6px;
+    background: rgba(0, 0, 0, 0.6); color: #fff; border: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bluesky Splitter</h1>
+  <p>Paste text on the left and it's split into posts of up to 300 characters, breaking at sentences where it can
+    and keeping posts roughly even. Add images to any post, then post the whole thread at once. Posting needs an
+    <strong>app password</strong>, not your account password: create one in Bluesky under
+    <a href="https://bsky.app/settings/app-passwords" target="_blank">Settings → Privacy and security → App passwords</a>.
+    It's never sent anywhere except Bluesky, and is only saved in this browser if you tick "Remember password".</p>
+</header>
+<main>
+  <div class="col">
+    <div class="col-head"><span>Paste text</span><span id="total"></span></div>
+    <textarea id="input" placeholder="Paste your text here…" autofocus></textarea>
+  </div>
+  <div class="col">
+    <div class="col-head"><span>Bluesky account</span></div>
+    <div class="account">
+      <input id="handle" placeholder="you.bsky.social" autocomplete="username">
+      <input id="appPassword" type="password" placeholder="App password" autocomplete="current-password">
+      <label class="remember"><input type="checkbox" id="remember"> Remember password</label>
+    </div>
+    <div class="col-head thread-head">
+      <span id="summary">Posts</span>
+      <span class="actions"><span id="threadMsg"></span><button id="postBtn" class="primary" disabled>Post thread</button></span>
+    </div>
+    <div id="posts"><div class="empty">Posts will appear here.</div></div>
+  </div>
+</main>
+
+<script>
+// ---- Splitting ----
+// Bluesky's limit is 300 graphemes (an emoji counts as 1).
+const LIMIT = 300;
+// Cost of ending a post at each kind of break. Lower is preferred.
+const PENALTY = { para: 0, sentence: 2000, clause: 9000, word: 20000 };
+// Cost of each extra post, so fewer posts win unless they need ugly breaks.
+const POST_COST = 10000;
+// Longer "words" (e.g. URLs) are hard-split into chunks this size.
+const MAX_TOKEN = 280;
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const sentences = new Intl.Segmenter(undefined, { granularity: 'sentence' });
+const glen = s => { let n = 0; for (const _ of graphemes.segment(s)) n++; return n; };
+
+// Turn text into word tokens, each tagged with the kind of break that follows it.
+function tokenize(text) {
+  const tokens = [];
+  const paras = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+  paras.forEach((para, pi) => {
+    const sents = [...sentences.segment(para)].map(s => s.segment.trim()).filter(Boolean);
+    sents.forEach((sent, si) => {
+      const words = sent.split(/\s+/).filter(Boolean);
+      words.forEach((word, wi) => {
+        let sep = ' ';
+        if (tokens.length === 0) sep = '';
+        else if (si === 0 && wi === 0) sep = '\n\n';
+        let brk = 'word';
+        if (wi === words.length - 1) brk = si === sents.length - 1 ? 'para' : 'sentence';
+        else if (/[,;:)–—]$/.test(word)) brk = 'clause';
+
+        const chunks = [...graphemes.segment(word)].map(g => g.segment);
+        for (let c = 0; c < chunks.length; c += MAX_TOKEN) {
+          const last = c + MAX_TOKEN >= chunks.length;
+          const t = chunks.slice(c, c + MAX_TOKEN).join('');
+          tokens.push({ text: t, len: glen(t), sep: c === 0 ? sep : '', brk: last ? brk : 'word' });
+        }
+      });
+    });
+  });
+  return tokens;
+}
+
+// Best split of tokens into exactly k posts of at most `limit` graphemes,
+// keeping post lengths close to even and preferring good break points.
+function solve(tokens, k, limit) {
+  const n = tokens.length;
+  const total = tokens.reduce((s, t) => s + t.len + t.sep.length, 0);
+  const target = total / k;
+  const dp = Array.from({ length: k + 1 }, () => new Array(n + 1).fill(Infinity));
+  const back = Array.from({ length: k + 1 }, () => new Array(n + 1).fill(-1));
+  dp[0][0] = 0;
+  for (let m = 1; m <= k; m++) {
+    for (let i = 1; i <= n; i++) {
+      const endCost = i < n ? PENALTY[tokens[i - 1].brk] : 0;
+      let len = 0;
+      for (let j = i - 1; j >= 0; j--) {
+        len += tokens[j].len + (j < i - 1 ? tokens[j + 1].sep.length : 0);
+        if (len > limit) break;
+        if (dp[m - 1][j] === Infinity) continue;
+        const c = dp[m - 1][j] + (len - target) ** 2 + endCost;
+        if (c < dp[m][i]) { dp[m][i] = c; back[m][i] = j; }
+      }
+    }
+  }
+  if (dp[k][n] === Infinity) return null;
+  const posts = [];
+  for (let m = k, i = n; m > 0; i = back[m][i], m--) {
+    const slice = tokens.slice(back[m][i], i);
+    posts.unshift(slice.map((t, idx) => (idx ? t.sep : '') + t.text).join(''));
+  }
+  return { posts, cost: dp[k][n] + POST_COST * k };
+}
+
+// Split text into posts (Bluesky shows thread position itself).
+function split(text) {
+  const tokens = tokenize(text);
+  if (!tokens.length) return [];
+  const total = tokens.reduce((s, t) => s + t.len + t.sep.length, 0);
+  let best = null, firstK = null;
+  for (let k = Math.max(1, Math.ceil(total / LIMIT)); k <= tokens.length; k++) {
+    const r = solve(tokens, k, LIMIT);
+    if (!r) continue;
+    if (firstK === null) firstK = k;
+    if (!best || r.cost < best.cost) best = r;
+    if (k >= firstK + 1) break;  // try the minimum post count and one more
+  }
+  return best.posts;
+}
+
+// ---- Bluesky ----
+const PDS_DEFAULT = 'https://bsky.social';
+
+// body is JSON, or a Blob for uploadBlob.
+async function xrpc(host, method, body, token) {
+  const isBlob = body instanceof Blob;
+  const res = await fetch(`${host}/xrpc/${method}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': isBlob ? body.type : 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+    },
+    body: isBlob ? body : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || `${method} failed (${res.status})`);
+  return data;
+}
+
+const URL_RE = /https?:\/\/[^\s]+/g;
+const trimUrl = u => u.replace(/[.,;:!?)\]]+$/, '');
+
+// Images over this size or dimension are re-encoded as JPEG (Bluesky's cap is 1,000,000 bytes).
+const MAX_IMAGES = 4, MAX_BYTES = 950000, MAX_DIM = 2000;
+
+async function shrink(blob) {
+  const bmp = await createImageBitmap(blob);
+  let scale = Math.min(1, MAX_DIM / Math.max(bmp.width, bmp.height));
+  if (scale === 1 && blob.size <= MAX_BYTES && /^image\/(jpeg|png|webp)$/.test(blob.type)) {
+    return { blob, width: bmp.width, height: bmp.height };
+  }
+  for (;;) {
+    const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';  // JPEG has no transparency
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+    if (out.size <= MAX_BYTES) return { blob: out, width: w, height: h };
+    scale *= 0.8;
+  }
+}
+
+// Preview card for the first URL in a post, via the service Bluesky's own app uses.
+// Optional: any failure just means no card.
+async function linkCard(text, pds, token) {
+  const m = text.match(URL_RE);
+  if (!m) return null;
+  const uri = trimUrl(m[0]);
+  try {
+    const d = await (await fetch(`https://cardyb.bsky.app/v1/extract?url=${encodeURIComponent(uri)}`)).json();
+    if (d.error || !d.title) return null;
+    const external = { uri, title: d.title, description: d.description || '' };
+    if (d.image) {
+      try {
+        const img = await shrink(await (await fetch(d.image)).blob());
+        external.thumb = (await xrpc(pds, 'com.atproto.repo.uploadBlob', img.blob, token)).blob;
+      } catch {}
+    }
+    return { $type: 'app.bsky.embed.external', external };
+  } catch {
+    return null;
+  }
+}
+
+// Bluesky doesn't auto-link; mark URLs and #tags by UTF-8 byte range.
+function facets(text) {
+  const enc = new TextEncoder();
+  const byte = i => enc.encode(text.slice(0, i)).length;
+  const out = [];
+  for (const m of text.matchAll(URL_RE)) {
+    const uri = trimUrl(m[0]);
+    out.push({
+      index: { byteStart: byte(m.index), byteEnd: byte(m.index + uri.length) },
+      features: [{ $type: 'app.bsky.richtext.facet#link', uri }],
+    });
+  }
+  for (const m of text.matchAll(/(^|\s)#([^\s#.,;:!?()]+)/g)) {
+    if (/^\d+$/.test(m[2])) continue;
+    const start = m.index + m[1].length;
+    out.push({
+      index: { byteStart: byte(start), byteEnd: byte(start + 1 + m[2].length) },
+      features: [{ $type: 'app.bsky.richtext.facet#tag', tag: m[2] }],
+    });
+  }
+  return out;
+}
+
+// A session's scope says how it signed in: 'com.atproto.access' means the account password,
+// 'com.atproto.appPass' (or appPassPrivileged) an app password.
+function sessionScope(jwt) {
+  try {
+    return JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).scope;
+  } catch {
+    return null;
+  }
+}
+
+// The thread being posted: which posts are up, so a failure can be resumed.
+let thread = null;  // { key, posts, did, refs: [{uri, cid}], error }
+let busy = false;
+
+async function postThread() {
+  const handle = handleEl.value.trim().replace(/^@/, '');
+  const password = passwordEl.value.trim();
+  if (!handle || !password) { threadMsg.textContent = 'Enter your handle and app password.'; return; }
+  if (renderTimer) render();  // pick up any typing still waiting to re-split
+  const key = currentPosts.join('\0');
+  if (!thread || thread.key !== key) thread = { key, posts: currentPosts, refs: [] };
+  const n = thread.posts.length, done = thread.refs.length;
+  const what = done ? `the remaining ${n - done} of ${n} posts` : `${n} post${n > 1 ? 's' : ''}`;
+  if (!confirm(`Post ${what} to Bluesky as @${handle}?`)) return;
+
+  busy = true;
+  thread.error = null;
+  updateThreadUI();
+  try {
+    threadMsg.textContent = 'Signing in…';
+    const session = await xrpc(PDS_DEFAULT, 'com.atproto.server.createSession', { identifier: handle, password });
+    if (sessionScope(session.accessJwt) === 'com.atproto.access') {
+      passwordEl.value = '';
+      forgetPassword();
+      throw new Error('That is your account password. Use an app password instead (see above).');
+    }
+    const pds = session.didDoc?.service?.find(s => s.id === '#atproto_pds')?.serviceEndpoint || PDS_DEFAULT;
+    thread.did = session.did;
+    for (let i = thread.refs.length; i < n; i++) {
+      threadMsg.textContent = `Posting ${i + 1} of ${n}…`;
+      const text = thread.posts[i];
+      const record = { $type: 'app.bsky.feed.post', text, createdAt: new Date().toISOString() };
+      const f = facets(text);
+      if (f.length) record.facets = f;
+      if (i > 0) record.reply = { root: thread.refs[0], parent: thread.refs[i - 1] };
+      const imgs = media[i] || [];
+      if (imgs.length) {
+        threadMsg.textContent = `Uploading images for ${i + 1} of ${n}…`;
+        const images = [];
+        for (const m of imgs) {
+          const { blob } = await xrpc(pds, 'com.atproto.repo.uploadBlob', m.blob, session.accessJwt);
+          images.push({ alt: m.alt, image: blob, aspectRatio: { width: m.width, height: m.height } });
+        }
+        record.embed = { $type: 'app.bsky.embed.images', images };
+      } else {
+        const card = await linkCard(text, pds, session.accessJwt);
+        if (card) record.embed = card;
+      }
+      const { uri, cid } = await xrpc(pds, 'com.atproto.repo.createRecord',
+        { repo: session.did, collection: 'app.bsky.feed.post', record }, session.accessJwt);
+      thread.refs.push({ uri, cid });
+      updateThreadUI();
+    }
+  } catch (e) {
+    thread.error = e.message;
+  }
+  busy = false;
+  updateThreadUI();
+}
+
+// ---- UI ----
+const input = document.getElementById('input');
+const postsEl = document.getElementById('posts');
+const summary = document.getElementById('summary');
+const totalEl = document.getElementById('total');
+const handleEl = document.getElementById('handle');
+const passwordEl = document.getElementById('appPassword');
+const postBtn = document.getElementById('postBtn');
+const threadMsg = document.getElementById('threadMsg');
+let currentPosts = [];
+let statusEls = [];
+// Images attached to each post number: media[i] = [{ blob, url, alt, width, height }]
+const media = [];
+
+async function addImages(i, files) {
+  const list = (media[i] ||= []);
+  const skipped = [];
+  for (const f of files) {
+    if (list.length >= MAX_IMAGES) { skipped.push(`${f.name}: a post can have at most ${MAX_IMAGES} images`); continue; }
+    try {
+      const img = await shrink(f);
+      list.push({ ...img, url: URL.createObjectURL(img.blob), alt: '' });
+    } catch {
+      skipped.push(`${f.name}: the browser can't open this image (HEIC photos need converting to JPEG first)`);
+    }
+  }
+  render();
+  if (skipped.length) alert(`Some files weren't added:\n\n${skipped.join('\n')}`);
+}
+
+function updateThreadUI() {
+  const n = currentPosts.length;
+  const t = thread && thread.key === currentPosts.join('\0') ? thread : null;
+  const done = t ? t.refs.length : 0;
+  statusEls.forEach((el, i) => {
+    el.textContent = i < done ? '✓ Posted' : t?.error && i === done ? '✗ Failed' : '';
+    el.className = i < done ? 'ok' : 'err';
+  });
+  postBtn.disabled = busy || !n || done === n;
+  postBtn.textContent = done === n && n ? 'Posted' : done ? `Resume (${done} of ${n} posted)` : 'Post thread';
+  if (busy) return;  // postThread is showing progress
+  threadMsg.replaceChildren();
+  if (t?.error) {
+    threadMsg.innerHTML = '<span class="err"></span>';
+    threadMsg.firstChild.textContent = t.error;
+  } else if (n && done === n) {
+    const a = document.createElement('a');
+    a.href = `https://bsky.app/profile/${t.did}/post/${t.refs[0].uri.split('/').pop()}`;
+    a.target = '_blank';
+    a.textContent = 'View thread';
+    threadMsg.append(a);
+  }
+}
+
+let renderTimer = null;
+
+function render() {
+  clearTimeout(renderTimer);
+  renderTimer = null;
+  const text = input.value;
+  totalEl.textContent = text.trim() ? `${glen(text.trim())} characters` : '';
+  const posts = split(text);
+  currentPosts = posts;
+  statusEls = [];
+  summary.textContent = posts.length ? `${posts.length} post${posts.length > 1 ? 's' : ''}` : 'Posts';
+  postsEl.replaceChildren();
+  if (!posts.length) {
+    postsEl.innerHTML = '<div class="empty">Posts will appear here.</div>';
+  }
+  posts.forEach((p, i) => {
+    const len = glen(p);
+    const imgs = media[i] || [];
+    const card = document.createElement('div');
+    card.className = 'post';
+    card.innerHTML = `<div class="post-text"></div><div class="thumbs"></div>
+      <div class="post-foot"><span class="${len > LIMIT ? 'over' : ''}">${len} / ${LIMIT}</span>
+      <span class="actions"><span></span><button class="add">Add image</button><button class="copy">Copy</button></span></div>
+      <input type="file" accept="image/*" multiple hidden>`;
+    card.querySelector('.post-text').textContent = p;
+    statusEls.push(card.querySelector('.actions span'));
+
+    const fileIn = card.querySelector('input[type=file]');
+    const addBtn = card.querySelector('.add');
+    addBtn.disabled = imgs.length >= MAX_IMAGES;
+    addBtn.onclick = () => fileIn.click();
+    fileIn.onchange = () => addImages(i, fileIn.files);
+    card.ondragover = e => { e.preventDefault(); card.classList.add('drag'); };
+    card.ondragleave = e => { if (!card.contains(e.relatedTarget)) card.classList.remove('drag'); };
+    card.ondrop = e => { e.preventDefault(); card.classList.remove('drag'); addImages(i, e.dataTransfer.files); };
+
+    const thumbs = card.querySelector('.thumbs');
+    imgs.forEach((m, j) => {
+      const t = document.createElement('div');
+      t.className = 'thumb';
+      t.innerHTML = '<img alt=""><button class="remove" title="Remove">×</button><input placeholder="Alt text">';
+      t.querySelector('img').src = m.url;
+      const alt = t.querySelector('input');
+      alt.value = m.alt;
+      alt.oninput = () => (m.alt = alt.value);
+      t.querySelector('.remove').onclick = () => { URL.revokeObjectURL(m.url); imgs.splice(j, 1); render(); };
+      thumbs.append(t);
+    });
+
+    const btn = card.querySelector('.copy');
+    btn.onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(p);
+        btn.textContent = 'Copied';
+      } catch {
+        btn.textContent = 'Copy failed';
+      }
+      setTimeout(() => (btn.textContent = 'Copy'), 1200);
+    };
+    postsEl.append(card);
+  });
+  updateThreadUI();
+}
+
+// The handle is always remembered; the password only when "Remember password" is ticked,
+// since other pages on the same origin (all local files, in Chrome) can read localStorage.
+const rememberEl = document.getElementById('remember');
+const store = {
+  get: k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+  remove: k => { try { localStorage.removeItem(k); } catch {} },
+};
+const forgetPassword = () => store.remove('bsky-app-password');
+const savePassword = () => { if (rememberEl.checked) store.set('bsky-app-password', passwordEl.value); };
+
+handleEl.value = store.get('bsky-handle');
+passwordEl.value = store.get('bsky-app-password');
+rememberEl.checked = !!passwordEl.value;
+handleEl.addEventListener('input', () => store.set('bsky-handle', handleEl.value));
+passwordEl.addEventListener('input', savePassword);
+rememberEl.addEventListener('change', () => (rememberEl.checked ? savePassword() : forgetPassword()));
+
+// A file dropped outside a card would make the browser open it and lose the page.
+for (const type of ['dragover', 'drop']) {
+  window.addEventListener(type, e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
+}
+
+input.addEventListener('input', () => {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(render, 150);
+});
+postBtn.addEventListener('click', postThread);
+render();
+</script>
+</body>
+</html>

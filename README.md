@@ -16,3 +16,9 @@ To post, you need a Bluesky **app password**. Create one under Settings → Priv
 ## Privacy
 
 Everything runs in your browser. Your text, images and app password go only to Bluesky. Link previews are fetched through `cardyb.bsky.app`, the same service Bluesky's own app uses. The page remembers your handle. It saves the password in the browser's local storage only if you tick "Remember password". Leave that off on shared machines, or when running the page as a local file, since other local pages can read that storage.
+
+## Why not OAuth?
+
+OAuth would let Splitter ask for narrower permissions, such as "create posts" only, but Bluesky's OAuth requires the page to be hosted over HTTPS and depends on a sizable client library. Splitter is meant to be downloaded and opened as a local file with no build step or dependencies, so it uses an app password instead.
+
+To limit the risk, create an app password used only by Splitter, so you can revoke it in Bluesky's settings without affecting anything else.

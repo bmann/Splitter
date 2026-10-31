@@ -26,6 +26,7 @@
   h1 { margin: 0; font-size: 20px; }
   header p { margin: 6px 0 0; color: var(--muted); font-size: 14px; }
   header a { color: var(--accent); }
+  header p.aside { font-size: 12px; }
   main {
     display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
     padding: 16px 20px 20px; flex: 1; min-height: 0;
@@ -99,10 +100,12 @@
 <header>
   <h1>Bluesky Splitter</h1>
   <p>Paste text on the left and it's split into posts of up to 300 characters, breaking at sentences where it can
-    and keeping posts roughly even. Add images to any post, then post the whole thread at once. Posting needs an
-    <strong>app password</strong>, not your account password: create one in Bluesky under
+    and keeping posts roughly even. Add images to any post, then post the whole thread at once.</p>
+  <p class="aside">Posting needs an <strong>app password</strong>, not your account password: create one in Bluesky under
     <a href="https://bsky.app/settings/app-passwords" target="_blank">Settings → Privacy and security → App passwords</a>.
-    It's never sent anywhere except Bluesky, and is only saved in this browser if you tick "Remember password".</p>
+    It's never sent anywhere except Bluesky, and is only saved in this browser if you tick "Remember password".
+    Why not OAuth? This is a personal tool you run as a local file, and Bluesky's OAuth only works
+    from a hosted web page. For safety, make an app password just for Splitter, so you can revoke it on its own.</p>
 </header>
 <main>
   <div class="col">

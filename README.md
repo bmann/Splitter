@@ -106,7 +106,7 @@ There are a few ways to open it, and they differ in what sign-in they allow.
 
 ### Hosted on GitHub Pages
 
-Open <https://bmann.github.io/Splitter/>. It installs as a PWA, works offline after the first load,
+Open <https://splitter.bmannconsulting.com/>. It installs as a PWA, works offline after the first load,
 and signs in with OAuth from that origin. The deployment is the static app on the `gh-pages` branch,
 with its own `client-metadata.json`.
 
@@ -176,10 +176,12 @@ There is no client library; the app speaks the protocol directly.
 ## Deployment
 
 The hosted version is served by GitHub Pages from the `gh-pages` branch at
-<https://bmann.github.io/Splitter/>. That branch is the static app plus `client-metadata.json` and
-`.nojekyll`; there is no build step or server. To deploy an app change, copy the files from `main`
-to the branch and push. The metadata document is host-specific: a fork at another origin needs its
-own `client_id` and `redirect_uris`.
+<https://splitter.bmannconsulting.com/>. That branch is the static app plus `client-metadata.json`,
+`.nojekyll` and a `CNAME` file; there is no build step or server. `splitter.bmannconsulting.com` is a
+DNS-only CNAME to `bmann.github.io`. To deploy an app change, copy the files from `main` to the branch
+and push. The metadata document is host-specific: a fork at another origin needs its own `client_id`
+and `redirect_uris`. GitHub Pages must have a TLS certificate for the custom domain before mobile
+install or OAuth works over HTTPS.
 
 ## Layout
 

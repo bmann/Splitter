@@ -1,10 +1,10 @@
 {
-  "client_id": "https://bmann.github.io/Splitter/client-metadata.json",
+  "client_id": "https://splitter.bmannconsulting.com/client-metadata.json",
   "client_name": "Atmosphere Splitter",
-  "client_uri": "https://bmann.github.io/Splitter/",
-  "logo_uri": "https://bmann.github.io/Splitter/icons/icon-512.png",
+  "client_uri": "https://splitter.bmannconsulting.com/",
+  "logo_uri": "https://splitter.bmannconsulting.com/icons/icon-512.png",
   "redirect_uris": [
-    "https://bmann.github.io/Splitter/"
+    "https://splitter.bmannconsulting.com/"
   ],
   "grant_types": [
     "authorization_code",

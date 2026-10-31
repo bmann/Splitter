@@ -9,6 +9,7 @@ Splits pasted text into Bluesky posts and posts them as a thread. See `README.md
 - Never cache cross-origin requests in `sw.js`, and never put tokens in local storage.
 - Mentions resolve to DIDs before `createRecord`; a failed lookup must always fall back to plain text. Typeahead queries are debounced and cached, and the service is a third party (`typeahead.waow.tech`), so keep the `X-Client` header set.
 - Link cards are fetched once while typing and reused at post time — never fetch `cardyb` again inside `postThread()`. A failed card fetch must never block splitting or posting, and the thumbnail slot must say why it is empty.
+- A `bsky.app/profile/…/post/…` URL is a quote, not an external card: resolve it to `{ uri, cid }` through `public.api.bsky.app` (`getPosts`) and post `app.bsky.embed.record`. Cache by URL and reuse the resolved CID at post time; quoting is still an `app.bsky.feed.post` create, so `app.bsky.authCreatePosts` already covers it.
 - A continuation keeps `root` (the original first ref) and `parent` (the last published ref) on the thread; `refs[0]` is only the root of a first segment. A failed segment must keep its continuation state so Resume replies from the same parent.
 - Discuss and get approval before changing direction or architecture; small fixes the user asked for can go straight ahead.
 - The repo is public: never put app passwords, tokens or personal content in committed files. Credentials live only in the user's browser.

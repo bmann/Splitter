@@ -193,6 +193,30 @@
   .card-off { margin-top: 6px; font-size: 12px; color: var(--muted); }
   .card-off button { padding: 0; border: none; font-size: 12px; }
 
+  /* A quoted post reuses the card frame but reads like a post. */
+  .card.quote { padding: 10px; padding-right: 38px; }
+  .quote-head { display: flex; align-items: center; gap: 8px; }
+  .quote-head img {
+    flex: none; width: 32px; height: 32px; border-radius: 50%;
+    object-fit: cover; background: var(--border);
+  }
+  .quote-names { display: flex; flex-direction: column; min-width: 0; }
+  .quote-name {
+    font-size: 13px; font-weight: 600; line-height: 1.25;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .quote-handle {
+    font-size: 12px; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .quote-text {
+    display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden;
+    margin-top: 8px; font-size: 14px; line-height: 1.4;
+    white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+  .quote-img { margin-top: 8px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  .quote-img img { width: 100%; aspect-ratio: 1.91 / 1; object-fit: cover; display: block; }
+
   /* Handle completion, anchored under the caret. */
   .suggest {
     position: absolute; z-index: 10; width: min(360px, calc(100vw - 16px));
@@ -419,12 +443,14 @@ async function shrink(blob) {
   }
 }
 
-// ---- Link previews ----
-// A post's first URL gets a card, fetched once while typing and reused at post time, so the
-// preview is exactly what gets embedded. cardyb is the service Bluesky's own app uses.
+// ---- Previews ----
+// A post's first URL gets a preview, fetched once while typing and reused at post time, so the
+// preview is exactly what gets embedded. A bsky.app post URL becomes a quote (a record embed);
+// everything else becomes an external card through cardyb, the service Bluesky's own app uses.
 const CARD_API = 'https://cardyb.bsky.app/v1/extract';
-const cards = new Map();     // url -> { state: 'loading' | 'ready' | 'empty' | 'failed', data, blob, thumbError, promise }
-const cardsOff = new Set();  // urls whose preview the user dropped
+const cards = new Map();     // url -> { state: 'loading' | 'ready' | 'empty' | 'failed', data, blob, thumbError, promise, settled }
+const quotes = new Map();    // url -> { state: 'loading' | 'ready' | 'empty' | 'failed', data, promise, settled }
+const previewsOff = new Set();  // urls whose preview the user dropped
 
 const firstUrl = text => {
   const m = text.match(URL_RE);
@@ -433,6 +459,16 @@ const firstUrl = text => {
 
 function hostOf(uri) {
   try { return new URL(uri).hostname.replace(/^www\./, ''); } catch { return uri; }
+}
+
+// Wait for a preview fetch, but never let a slow card hold up posting.
+const settleWithin = promise => Promise.race([promise, new Promise(r => setTimeout(r, 4000))]);
+
+// A bsky.app post permalink. A handle is resolved later; a DID is used as-is.
+const BSKY_POST_RE = /^https?:\/\/(?:www\.)?bsky\.app\/profile\/([^/?#]+)\/post\/([^/?#]+)/i;
+function bskyPost(url) {
+  const m = url.match(BSKY_POST_RE);
+  return m ? { actor: decodeURIComponent(m[1]), rkey: decodeURIComponent(m[2]) } : null;
 }
 
 function loadCard(url) {
@@ -473,14 +509,61 @@ function loadCard(url) {
   return entry;
 }
 
-// Post-time card: reuse the preview's fetch. A dropped, missing or failed card means no embed.
-async function linkCard(text, auth) {
-  const uri = firstUrl(text);
-  if (!uri || cardsOff.has(uri)) return null;
-  const entry = loadCard(uri);
-  if (!entry.settled) {
-    await Promise.race([entry.promise, new Promise(r => setTimeout(r, 4000))]);
-  }
+// The image a quoted post shows in a feed, if any (images, link thumb or video poster).
+function quoteImage(post) {
+  const media = post.embed?.$type === 'app.bsky.embed.recordWithMedia#view' ? post.embed.media : post.embed;
+  if (!media) return '';
+  if (media.$type === 'app.bsky.embed.images#view') return media.images?.[0]?.thumb || '';
+  if (media.$type === 'app.bsky.embed.external#view') return media.external?.thumb || '';
+  if (media.$type === 'app.bsky.embed.video#view') return media.thumbnail || '';
+  return '';
+}
+
+// Resolve a bsky.app permalink to the post record, including the CID a quote embed needs.
+function loadQuote(url) {
+  let entry = quotes.get(url);
+  if (entry) return entry;
+  const ref = bskyPost(url);
+  if (!ref) return { state: 'failed', settled: true };
+  entry = { state: 'loading' };
+  quotes.set(url, entry);
+  entry.promise = (async () => {
+    try {
+      const actor = ref.actor.startsWith('did:')
+        ? ref.actor
+        : (await getJson(`${PUBLIC_API}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(ref.actor)}`)).did;
+      if (!actor) throw new Error('handle not found');
+      const uri = `at://${actor}/app.bsky.feed.post/${ref.rkey}`;
+      const d = await getJson(`${PUBLIC_API}/xrpc/app.bsky.feed.getPosts?uris=${encodeURIComponent(uri)}`);
+      const post = d.posts?.find(p => p.uri === uri) || d.posts?.[0];
+      if (!post?.cid) {
+        entry.state = 'empty';
+      } else {
+        entry.state = 'ready';
+        entry.data = {
+          uri: post.uri,
+          cid: post.cid,
+          name: post.author?.displayName || post.author?.handle || 'Bluesky user',
+          handle: post.author?.handle || '',
+          avatar: post.author?.avatar || '',
+          text: post.record?.text || '',
+          image: quoteImage(post),
+        };
+      }
+    } catch {
+      entry.state = 'failed';
+    } finally {
+      entry.settled = true;
+      if (!busy) scheduleRender(0);
+    }
+  })();
+  return entry;
+}
+
+// Post-time external card: reuse the preview's fetch.
+async function externalCard(url, auth) {
+  const entry = loadCard(url);
+  if (!entry.settled) await settleWithin(entry.promise);
   if (entry.state !== 'ready') return null;
   const external = { uri: entry.data.uri, title: entry.data.title, description: entry.data.description };
   if (entry.blob) {
@@ -490,6 +573,24 @@ async function linkCard(text, auth) {
     } catch {}  // the text card still posts; the preview warned about the thumbnail
   }
   return { $type: 'app.bsky.embed.external', external };
+}
+
+// Post-time quote: the preview already resolved the record and its CID.
+async function quoteEmbed(url) {
+  const entry = loadQuote(url);
+  if (!entry.settled) await settleWithin(entry.promise);
+  if (entry.state !== 'ready') return null;
+  return {
+    $type: 'app.bsky.embed.record',
+    record: { uri: entry.data.uri, cid: entry.data.cid },
+  };
+}
+
+// The embed for a post: its first URL, quoted when it points at a Bluesky post.
+async function embedFor(text, auth) {
+  const url = firstUrl(text);
+  if (!url || previewsOff.has(url)) return null;
+  return bskyPost(url) ? quoteEmbed(url) : externalCard(url, auth);
 }
 
 // Spans of text that Bluesky renders as links, tags or mentions, as UTF-16 indices into the
@@ -1032,8 +1133,8 @@ async function postThread() {
         }
         record.embed = { $type: 'app.bsky.embed.images', images };
       } else {
-        const card = await linkCard(text, auth);
-        if (card) record.embed = card;
+        const embed = await embedFor(text, auth);
+        if (embed) record.embed = embed;
       }
       const { uri, cid } = await auth.xrpc('com.atproto.repo.createRecord',
         { repo: auth.did, collection: 'app.bsky.feed.post', record });
@@ -1244,48 +1345,23 @@ function richText(el, text, dids) {
   if (at < text.length) el.append(text.slice(at));
 }
 
-// Paint the link card (or why there isn't one) for a post that has a URL and no images.
-function renderCard(slot, url) {
-  slot.replaceChildren();
-  if (cardsOff.has(url)) {
-    const row = document.createElement('div');
-    row.className = 'card-off';
-    row.append('Link preview off. ');
-    const show = document.createElement('button');
-    show.type = 'button';
-    show.textContent = 'Show preview';
-    show.onclick = () => { cardsOff.delete(url); render(); };
-    row.append(show);
-    slot.append(row);
-    return;
-  }
-  const entry = cards.get(url);
-  if (!entry || entry.state === 'loading') {
-    const note = document.createElement('div');
-    note.className = 'card-note';
-    note.textContent = `Checking link… ${hostOf(url)}`;
-    slot.append(note);
-    return;
-  }
-  if (entry.state !== 'ready') {
-    const note = document.createElement('div');
-    note.className = 'card-note';
-    note.textContent = 'no preview available';
-    slot.append(note);
-    return;
-  }
-
-  const { data } = entry;
-  const card = document.createElement('div');
-  card.className = 'card';
-
+// The remove control shared by every preview.
+function previewControls(card, url) {
   const drop = document.createElement('button');
   drop.type = 'button';
   drop.className = 'drop';
-  drop.title = 'Remove link preview';
-  drop.setAttribute('aria-label', 'Remove link preview');
+  drop.title = 'Remove preview';
+  drop.setAttribute('aria-label', 'Remove preview');
   drop.textContent = '×';
-  drop.onclick = () => { cardsOff.add(url); render(); };
+  drop.onclick = () => { previewsOff.add(url); render(); };
+  card.append(drop);
+}
+
+// An external link card.
+function cardNode(entry) {
+  const { data } = entry;
+  const card = document.createElement('div');
+  card.className = 'card';
 
   const image = document.createElement('div');
   if (!data.image) {
@@ -1328,7 +1404,94 @@ function renderCard(slot, url) {
     body.append(desc);
   }
 
-  card.append(drop, image, body);
+  card.append(image, body);
+  return card;
+}
+
+// A quoted Bluesky post: author, text and its first image.
+function quoteNode(entry) {
+  const d = entry.data;
+  const card = document.createElement('div');
+  card.className = 'card quote';
+
+  const head = document.createElement('div');
+  head.className = 'quote-head';
+  if (d.avatar) {
+    const avatar = document.createElement('img');
+    avatar.alt = '';
+    avatar.loading = 'lazy';
+    avatar.referrerPolicy = 'no-referrer';
+    avatar.src = d.avatar;
+    avatar.onerror = () => avatar.remove();
+    head.append(avatar);
+  }
+  const names = document.createElement('div');
+  names.className = 'quote-names';
+  const name = document.createElement('div');
+  name.className = 'quote-name';
+  name.textContent = d.name;
+  const handle = document.createElement('div');
+  handle.className = 'quote-handle';
+  handle.textContent = d.handle ? `@${d.handle}` : '';
+  names.append(name, handle);
+  head.append(names);
+
+  const text = document.createElement('div');
+  text.className = 'quote-text';
+  text.textContent = d.text;
+  text.hidden = !d.text;
+  card.append(head, text);
+
+  if (d.image) {
+    const wrap = document.createElement('div');
+    wrap.className = 'quote-img';
+    const img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    img.referrerPolicy = 'no-referrer';
+    img.src = d.image;
+    img.onerror = () => wrap.remove();
+    wrap.append(img);
+    card.append(wrap);
+  }
+  return card;
+}
+
+// Paint the preview, or explain why there isn't one, for a post that has no images.
+function renderPreview(slot, text) {
+  slot.replaceChildren();
+  const url = firstUrl(text);
+  if (!url) return;
+  if (previewsOff.has(url)) {
+    const row = document.createElement('div');
+    row.className = 'card-off';
+    row.append('Preview off. ');
+    const show = document.createElement('button');
+    show.type = 'button';
+    show.textContent = 'Show preview';
+    show.onclick = () => { previewsOff.delete(url); render(); };
+    row.append(show);
+    slot.append(row);
+    return;
+  }
+  const quote = !!bskyPost(url);
+  const entry = quote ? loadQuote(url) : loadCard(url);
+  if (!entry || entry.state === 'loading') {
+    const note = document.createElement('div');
+    note.className = 'card-note';
+    note.textContent = quote ? 'Loading quoted post…' : `Checking link… ${hostOf(url)}`;
+    slot.append(note);
+    return;
+  }
+  if (entry.state !== 'ready') {
+    const note = document.createElement('div');
+    note.className = 'card-note';
+    note.textContent = quote ? 'quoted post unavailable' : 'no preview available';
+    slot.append(note);
+    return;
+  }
+  const card = quote ? quoteNode(entry) : cardNode(entry);
+  previewControls(card, url);
   slot.append(card);
 }
 
@@ -1424,14 +1587,8 @@ function render() {
       thumbs.append(t);
     });
 
-    // A card is only possible when the post has no images: images win in the record.
-    if (!imgs.length) {
-      const url = firstUrl(p);
-      if (url) {
-        loadCard(url);
-        renderCard(card.querySelector('.card-slot'), url);
-      }
-    }
+    // A preview is only possible when the post has no images: images win in the record.
+    if (!imgs.length) renderPreview(card.querySelector('.card-slot'), p);
 
     postsEl.append(card);
   });

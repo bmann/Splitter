@@ -185,6 +185,9 @@
     <p class="note" id="oauthNote" hidden></p>
     <p class="err-note" id="authMsg" hidden></p>
     <button id="installBtn" type="button" hidden>Install app</button>
+    <p class="note" id="iosNote" hidden>To install on an iPhone or iPad, open this page in Safari, sign in there,
+      then Share → Add to Home Screen. A home-screen app has its own storage and can't finish the sign-in
+      redirect.</p>
   </div>
 </header>
 <main>
@@ -575,6 +578,9 @@ async function authServer(pds) {
       if (!meta.pushed_authorization_request_endpoint) {
         throw new Error('That server does not support pushed authorization requests.');
       }
+      if (meta.require_pushed_authorization_requests === false) {
+        throw new Error('That server does not require pushed authorization requests.');
+      }
       if (!(meta.dpop_signing_alg_values_supported || []).includes('ES256')) {
         throw new Error('That server does not support the required DPoP signing algorithm.');
       }
@@ -690,6 +696,10 @@ async function finishOAuth() {
     };
     await kvSet('oauth-session', oauth);
     store.set('bsky-handle', flow.handle);
+    // The app password is not needed any more, so don't leave it lying around.
+    passwordEl.value = '';
+    rememberEl.checked = false;
+    forgetPassword();
     setAuthMsg('');
   } catch (e) {
     setAuthMsg(e.message);
@@ -1063,7 +1073,9 @@ installBtn.addEventListener('click', async () => {
   installPrompt = null;
   installBtn.hidden = true;
 });
-if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) installBtn.hidden = true;
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+if (standalone) installBtn.hidden = true;
+else if (/iP(hone|ad|od)/.test(navigator.userAgent)) document.getElementById('iosNote').hidden = false;
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));

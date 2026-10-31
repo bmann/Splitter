@@ -75,7 +75,7 @@ seam for that but no hosted client yet.
 
 ## Layout
 
-| File | |
+| File | Purpose |
 | --- | --- |
 | `index.html` | the whole app: markup, styles, script |
 | `manifest.webmanifest` | name, icons, install behaviour |

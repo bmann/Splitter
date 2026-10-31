@@ -8,6 +8,7 @@ installed as an app, and it signs in with Bluesky's OAuth (or an app password, i
 - **Links, hashtags and mentions.** All three are made clickable. Typing `@` searches accounts as you type and stores the pick with its DID; hand-typed handles are resolved the same way. A handle that doesn't resolve stays plain text instead of failing the post.
 - **Link previews in the composer.** The first link in a post without images shows a card as you type — the same card that gets posted, fetched once through `cardyb`. Use × to drop it, so a bad preview never gets embedded. A card with no image says `cardyb returned no image`; a URL with no preview says so instead of leaving a blank.
 - **One-click threads.** If posting fails partway, the button resumes from where it stopped instead of starting over.
+- **New thread or continue.** After a thread publishes, start clean or reply to its last post and grow the same thread. Earlier posts stay visible, marked as posted, while the new ones are drafted. A failed thread only offers Resume.
 
 ## Use
 

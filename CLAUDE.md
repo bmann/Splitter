@@ -9,6 +9,7 @@ Splits pasted text into Bluesky posts and posts them as a thread. See `README.md
 - Never cache cross-origin requests in `sw.js`, and never put tokens in local storage.
 - Mentions resolve to DIDs before `createRecord`; a failed lookup must always fall back to plain text. Typeahead queries are debounced and cached, and the service is a third party (`typeahead.waow.tech`), so keep the `X-Client` header set.
 - Link cards are fetched once while typing and reused at post time — never fetch `cardyb` again inside `postThread()`. A failed card fetch must never block splitting or posting, and the thumbnail slot must say why it is empty.
+- A continuation keeps `root` (the original first ref) and `parent` (the last published ref) on the thread; `refs[0]` is only the root of a first segment. A failed segment must keep its continuation state so Resume replies from the same parent.
 - Discuss and get approval before changing direction or architecture; small fixes the user asked for can go straight ahead.
 - The repo is public: never put app passwords, tokens or personal content in committed files. Credentials live only in the user's browser.
 - After changing the script, at least run a syntax check (`node --check` on the extracted `<script>`), and check the page in a browser at `http://127.0.0.1:8000/` (console errors, service worker, install prompt). Posting and the OAuth consent click can only be tested by the user.

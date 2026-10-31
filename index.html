@@ -1,0 +1,1084 @@
+<!-- Splits pasted text into Bluesky posts and posts them as a thread -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bluesky Splitter</title>
+<meta name="description" content="Split long text into a Bluesky thread and post it in one go, with images and link previews.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f1f3f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#161e27" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Splitter">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<style>
+  /* Colours follow Bluesky's own light and dim themes. */
+  :root {
+    --bg: #f1f3f5; --panel: #fff; --text: #0b0f14; --muted: #6f869f;
+    --border: #dce2ea; --accent: #1083fe; --accent-soft: rgba(16, 131, 254, 0.1); --warn: #ec4868;
+    --shadow: 0 1px 2px rgba(11, 15, 20, 0.06), 0 2px 8px rgba(11, 15, 20, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161e27; --panel: #1c2736; --text: #f1f3f5; --muted: #8798b0;
+      --border: #2e4052; --accent: #1083fe; --accent-soft: rgba(16, 131, 254, 0.16); --warn: #ff6b81;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; }
+  /* Author display rules (e.g. .fields) would otherwise beat the UA rule for [hidden]. */
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, sans-serif;
+    height: 100vh; display: flex; flex-direction: column;
+  }
+  /* Header and main share a 1200px content width, centred on wide screens. */
+  header, main { padding-inline: max(24px, calc((100% - 1200px) / 2)); }
+  header {
+    display: flex; justify-content: space-between; align-items: flex-start; gap: 24px;
+    padding-block: 20px; background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.01em; }
+  header p { margin: 4px 0 0; color: var(--muted); max-width: 62ch; }
+  a { color: var(--accent); }
+  main {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+    padding-block: 20px 24px; flex: 1; min-height: 0;
+  }
+  @media (max-width: 760px) {
+    body { height: auto; }
+    header { flex-direction: column; }
+    .account { align-items: stretch; max-width: none; }
+    main { grid-template-columns: 1fr; }
+    textarea { min-height: 40vh; }
+  }
+
+  .account { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; max-width: 460px; }
+  .fields { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+  .fields > input {
+    width: 180px; padding: 7px 12px; font: inherit; font-size: 14px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
+  }
+  .fields > input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .remember { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); }
+  .help { font-size: 13px; color: var(--muted); text-align: right; }
+  .help summary { cursor: pointer; color: var(--accent); }
+  .help p { margin: 6px 0 0; text-align: left; font-size: 13px; }
+  .help .fields { justify-content: flex-start; margin-top: 6px; }
+  .who { font-size: 14px; color: var(--muted); }
+  .who strong { color: var(--text); }
+  .note { margin: 0; font-size: 13px; color: var(--muted); text-align: right; max-width: 46ch; }
+  .err-note { margin: 0; font-size: 13px; color: var(--warn); text-align: right; max-width: 46ch; }
+
+  .col { display: flex; flex-direction: column; min-height: 0; }
+  .col-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 13px; font-weight: 600; color: var(--muted); margin-bottom: 8px;
+  }
+  .col-foot { display: flex; justify-content: flex-end; align-items: center; gap: 12px; padding-top: 14px; font-size: 14px; }
+  textarea {
+    flex: 1; width: 100%; resize: none; padding: 16px;
+    border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
+    background: var(--panel); color: var(--text); font: inherit; font-size: 16px;
+  }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  /* Posts are drawn as a thread: a numbered badge per post, joined by a line. */
+  .scroll { flex: 1; overflow-y: auto; padding: 1px; }
+  #posts { display: flex; flex-direction: column; gap: 14px; }
+  .post {
+    position: relative; display: grid; grid-template-columns: 28px 1fr; gap: 12px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    box-shadow: var(--shadow); padding: 16px;
+  }
+  .post:not(:last-child)::after {
+    content: ''; position: absolute; left: 29px; top: 100%; width: 2px; height: 14px; background: var(--border);
+  }
+  .num {
+    width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 700;
+  }
+  .body { min-width: 0; }
+  .post-text { white-space: pre-wrap; word-wrap: break-word; font-size: 16px; padding-top: 2px; }
+  .post-foot {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 10px; font-size: 12px; color: var(--muted);
+  }
+  .count { display: flex; align-items: center; gap: 6px; }
+  .ring { width: 18px; height: 18px; transform: rotate(-90deg); fill: none; stroke-width: 2.5; }
+  .ring .track { stroke: var(--border); }
+  .ring .fill { stroke: var(--accent); }
+  .count.over { color: var(--warn); font-weight: 600; }
+  .count.over .fill { stroke: var(--warn); }
+  .actions { display: flex; gap: 4px; align-items: center; }
+  .err { color: var(--warn); }
+  .ok { color: var(--accent); font-weight: 600; }
+  .empty { color: var(--muted); padding: 24px 4px; }
+
+  button {
+    font: inherit; font-size: 13px; padding: 4px 12px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 999px;
+    background: transparent; color: var(--accent);
+  }
+  button:hover { border-color: var(--accent); }
+  button:disabled { opacity: 0.45; cursor: default; }
+  button.primary {
+    font-size: 15px; font-weight: 600; padding: 9px 22px;
+    background: var(--accent); color: #fff; border-color: var(--accent);
+  }
+  button.primary.small { font-size: 14px; padding: 7px 16px; }
+  button.icon { display: grid; place-items: center; padding: 6px; border: none; color: var(--muted); }
+  button.icon:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
+  button.icon svg {
+    width: 18px; height: 18px; fill: none; stroke: currentColor;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .post.drag { outline: 2px dashed var(--accent); }
+
+  .thumbs { display: flex; flex-direction: column; gap: 8px; }
+  .thumbs:not(:empty) { margin-top: 10px; }
+  .thumb { display: flex; gap: 8px; align-items: flex-start; }
+  .thumb .pic { flex: none; width: 110px; position: relative; }
+  .thumb img { width: 100%; height: 80px; object-fit: cover; border-radius: 8px; display: block; }
+  .thumb textarea {
+    flex: 1; min-width: 0; min-height: 80px; field-sizing: content; resize: vertical;
+    padding: 6px 8px; font-size: 13px; border-radius: 8px; box-shadow: none; background: var(--bg);
+  }
+  .thumb .remove {
+    position: absolute; top: 4px; right: 4px; padding: 0 7px;
+    background: rgba(0, 0, 0, 0.6); color: #fff; border: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Bluesky Splitter</h1>
+    <p>Paste text on the left and it's split into posts of up to 300 characters, breaking at sentences where it can
+      and keeping posts roughly even. Add images to any post, then post the whole thread at once.</p>
+  </div>
+  <div class="account">
+    <div class="fields" id="signInRow">
+      <input id="handle" placeholder="you.bsky.social" autocomplete="username" spellcheck="false" autocapitalize="none">
+      <button id="oauthBtn" class="primary small" type="button">Sign in with Bluesky</button>
+    </div>
+    <div class="fields" id="whoRow" hidden>
+      <span class="who">Signed in as <strong id="whoHandle"></strong></span>
+      <button id="signOutBtn" type="button">Sign out</button>
+    </div>
+    <details class="help" id="appPassDetails">
+      <summary>Use an app password instead</summary>
+      <div class="fields">
+        <input id="appPassword" type="password" placeholder="App password" autocomplete="current-password">
+        <label class="remember"><input type="checkbox" id="remember"> Remember</label>
+      </div>
+      <p>Use an app password, not your main password.
+        <a href="https://bsky.app/settings/app-passwords" target="_blank" rel="noreferrer">Create one in Bluesky</a>
+        just for Splitter, so you can revoke it anytime. It's sent only to Bluesky, and saved in this browser only if
+        you tick "Remember" — any other page on this address can read a saved password.</p>
+    </details>
+    <p class="note" id="oauthNote" hidden></p>
+    <p class="err-note" id="authMsg" hidden></p>
+    <button id="installBtn" type="button" hidden>Install app</button>
+  </div>
+</header>
+<main>
+  <div class="col">
+    <div class="col-head"><span>Your text</span><span id="total"></span></div>
+    <textarea id="input" placeholder="Paste your text here…" autofocus></textarea>
+  </div>
+  <div class="col">
+    <div class="col-head"><span id="summary">Thread</span></div>
+    <div class="scroll">
+      <div id="posts"></div>
+      <div class="col-foot"><span id="threadMsg"></span><button id="postBtn" class="primary" disabled>Post thread</button></div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ---- Splitting ----
+// Bluesky's limit is 300 graphemes (an emoji counts as 1).
+const LIMIT = 300;
+// Cost of ending a post at each kind of break. Lower is preferred.
+const PENALTY = { para: 0, sentence: 2000, clause: 9000, word: 20000 };
+// Cost of each extra post, so fewer posts win unless they need ugly breaks.
+const POST_COST = 10000;
+// Longer "words" (e.g. URLs) are hard-split into chunks this size.
+const MAX_TOKEN = 280;
+
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+const sentences = new Intl.Segmenter(undefined, { granularity: 'sentence' });
+const glen = s => { let n = 0; for (const _ of graphemes.segment(s)) n++; return n; };
+
+// Turn text into word tokens, each tagged with the kind of break that follows it.
+function tokenize(text) {
+  const tokens = [];
+  const paras = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+  paras.forEach((para, pi) => {
+    const sents = [...sentences.segment(para)].map(s => s.segment.trim()).filter(Boolean);
+    sents.forEach((sent, si) => {
+      const words = sent.split(/\s+/).filter(Boolean);
+      words.forEach((word, wi) => {
+        let sep = ' ';
+        if (tokens.length === 0) sep = '';
+        else if (si === 0 && wi === 0) sep = '\n\n';
+        let brk = 'word';
+        if (wi === words.length - 1) brk = si === sents.length - 1 ? 'para' : 'sentence';
+        else if (/[,;:)–—]$/.test(word)) brk = 'clause';
+
+        const chunks = [...graphemes.segment(word)].map(g => g.segment);
+        for (let c = 0; c < chunks.length; c += MAX_TOKEN) {
+          const last = c + MAX_TOKEN >= chunks.length;
+          const t = chunks.slice(c, c + MAX_TOKEN).join('');
+          tokens.push({ text: t, len: glen(t), sep: c === 0 ? sep : '', brk: last ? brk : 'word' });
+        }
+      });
+    });
+  });
+  return tokens;
+}
+
+// Best split of tokens into exactly k posts of at most `limit` graphemes,
+// keeping post lengths close to even and preferring good break points.
+function solve(tokens, k, limit) {
+  const n = tokens.length;
+  const total = tokens.reduce((s, t) => s + t.len + t.sep.length, 0);
+  const target = total / k;
+  const dp = Array.from({ length: k + 1 }, () => new Array(n + 1).fill(Infinity));
+  const back = Array.from({ length: k + 1 }, () => new Array(n + 1).fill(-1));
+  dp[0][0] = 0;
+  for (let m = 1; m <= k; m++) {
+    for (let i = 1; i <= n; i++) {
+      const endCost = i < n ? PENALTY[tokens[i - 1].brk] : 0;
+      let len = 0;
+      for (let j = i - 1; j >= 0; j--) {
+        len += tokens[j].len + (j < i - 1 ? tokens[j + 1].sep.length : 0);
+        if (len > limit) break;
+        if (dp[m - 1][j] === Infinity) continue;
+        const c = dp[m - 1][j] + (len - target) ** 2 + endCost;
+        if (c < dp[m][i]) { dp[m][i] = c; back[m][i] = j; }
+      }
+    }
+  }
+  if (dp[k][n] === Infinity) return null;
+  const posts = [];
+  for (let m = k, i = n; m > 0; i = back[m][i], m--) {
+    const slice = tokens.slice(back[m][i], i);
+    posts.unshift(slice.map((t, idx) => (idx ? t.sep : '') + t.text).join(''));
+  }
+  return { posts, cost: dp[k][n] + POST_COST * k };
+}
+
+// Split text into posts (Bluesky shows thread position itself).
+function split(text) {
+  const tokens = tokenize(text);
+  if (!tokens.length) return [];
+  const total = tokens.reduce((s, t) => s + t.len + t.sep.length, 0);
+  let best = null, firstK = null;
+  for (let k = Math.max(1, Math.ceil(total / LIMIT)); k <= tokens.length; k++) {
+    const r = solve(tokens, k, LIMIT);
+    if (!r) continue;
+    if (firstK === null) firstK = k;
+    if (!best || r.cost < best.cost) best = r;
+    if (k >= firstK + 1) break;  // try the minimum post count and one more
+  }
+  return best.posts;
+}
+
+// ---- Bluesky ----
+const PDS_DEFAULT = 'https://bsky.social';
+const PUBLIC_API = 'https://public.api.bsky.app';
+
+// body is JSON, or a Blob for uploadBlob.
+async function xrpc(host, method, body, token) {
+  const isBlob = body instanceof Blob;
+  const res = await fetch(`${host}/xrpc/${method}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': isBlob ? body.type : 'application/json',
+      ...(token && { Authorization: `Bearer ${token}` }),
+    },
+    body: isBlob ? body : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || `${method} failed (${res.status})`);
+  return data;
+}
+
+// Small JSON GET; surfaces the server's message when there is one.
+async function getJson(url) {
+  const res = await fetch(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || data.error_description || `${url} failed (${res.status})`);
+  return data;
+}
+
+const URL_RE = /https?:\/\/[^\s]+/g;
+const trimUrl = u => u.replace(/[.,;:!?)\]]+$/, '');
+
+// Images over this size or dimension are re-encoded as JPEG (Bluesky's cap is 1,000,000 bytes).
+const MAX_IMAGES = 4, MAX_BYTES = 950000, MAX_DIM = 2000;
+
+async function shrink(blob) {
+  const bmp = await createImageBitmap(blob);
+  let scale = Math.min(1, MAX_DIM / Math.max(bmp.width, bmp.height));
+  if (scale === 1 && blob.size <= MAX_BYTES && /^image\/(jpeg|png|webp)$/.test(blob.type)) {
+    return { blob, width: bmp.width, height: bmp.height };
+  }
+  for (;;) {
+    const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+    const canvas = new OffscreenCanvas(w, h);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';  // JPEG has no transparency
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+    if (out.size <= MAX_BYTES) return { blob: out, width: w, height: h };
+    scale *= 0.8;
+  }
+}
+
+// Preview card for the first URL in a post, via the service Bluesky's own app uses.
+// Optional: any failure just means no card.
+async function linkCard(text, auth) {
+  const m = text.match(URL_RE);
+  if (!m) return null;
+  const uri = trimUrl(m[0]);
+  try {
+    const d = await (await fetch(`https://cardyb.bsky.app/v1/extract?url=${encodeURIComponent(uri)}`)).json();
+    if (d.error || !d.title) return null;
+    const external = { uri, title: d.title, description: d.description || '' };
+    if (d.image) {
+      try {
+        const img = await shrink(await (await fetch(d.image)).blob());
+        external.thumb = (await auth.xrpc('com.atproto.repo.uploadBlob', img.blob)).blob;
+      } catch {}
+    }
+    return { $type: 'app.bsky.embed.external', external };
+  } catch {
+    return null;
+  }
+}
+
+// Bluesky doesn't auto-link; mark URLs and #tags by UTF-8 byte range.
+function facets(text) {
+  const enc = new TextEncoder();
+  const byte = i => enc.encode(text.slice(0, i)).length;
+  const out = [];
+  for (const m of text.matchAll(URL_RE)) {
+    const uri = trimUrl(m[0]);
+    out.push({
+      index: { byteStart: byte(m.index), byteEnd: byte(m.index + uri.length) },
+      features: [{ $type: 'app.bsky.richtext.facet#link', uri }],
+    });
+  }
+  for (const m of text.matchAll(/(^|\s)#([^\s#.,;:!?()]+)/g)) {
+    if (/^\d+$/.test(m[2])) continue;
+    const start = m.index + m[1].length;
+    out.push({
+      index: { byteStart: byte(start), byteEnd: byte(start + 1 + m[2].length) },
+      features: [{ $type: 'app.bsky.richtext.facet#tag', tag: m[2] }],
+    });
+  }
+  return out;
+}
+
+// A session's scope says how it signed in: 'com.atproto.access' means the account password,
+// 'com.atproto.appPass' (or appPassPrivileged) an app password.
+function sessionScope(jwt) {
+  try {
+    return JSON.parse(atob(jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).scope;
+  } catch {
+    return null;
+  }
+}
+
+// ---- OAuth ----
+// Sign-in follows the atproto OAuth profile: pushed authorization requests, PKCE, and
+// DPoP-bound tokens. There is no client library; everything below is the protocol itself.
+
+const SCOPE = [
+  'atproto',
+  'include:app.bsky.authCreatePosts',
+  'blob?accept=image/jpeg&accept=image/png&accept=image/webp',
+].join(' ');
+
+// Where this window's client identity comes from. Loopback is the only mode implemented;
+// a hosted deployment would publish client-metadata.json and return that URL here (issue #6).
+function clientIdFor(loc) {
+  if (loc.protocol === 'file:') return { ok: false, reason: 'file' };
+  if (loc.hostname === 'localhost') return { ok: false, reason: 'localhost' };
+  if (loc.hostname === '127.0.0.1' || loc.hostname === '[::1]') {
+    const redirectUri = loc.origin + loc.pathname;
+    const query = new URLSearchParams({ redirect_uri: redirectUri, scope: SCOPE });
+    return { ok: true, clientId: `http://localhost?${query}`, redirectUri };
+  }
+  if (loc.protocol === 'https:') return { ok: false, reason: 'hosted' };
+  return { ok: false, reason: 'insecure' };
+}
+
+const enc = new TextEncoder();
+const b64u = {
+  enc(bytes) {
+    const a = new Uint8Array(bytes);
+    let s = '';
+    for (let i = 0; i < a.length; i++) s += String.fromCharCode(a[i]);
+    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  },
+  str(str) { return b64u.enc(enc.encode(str)); },
+};
+const sha256 = async str => b64u.enc(await crypto.subtle.digest('SHA-256', enc.encode(str)));
+const random = (n = 32) => b64u.enc(crypto.getRandomValues(new Uint8Array(n)));
+
+// DPoP needs an ECDSA P-256 key. It is generated extractable once so the public JWK can be
+// read, then re-imported non-extractable so the private half cannot leave the browser.
+async function newDpopKey() {
+  const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']);
+  const jwk = await crypto.subtle.exportKey('jwk', pair.privateKey);
+  const { kty, crv, x, y } = jwk;
+  const privateKey = await crypto.subtle.importKey('jwk', jwk, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+  return { privateKey, publicJwk: { kty, crv, x, y } };
+}
+
+async function dpopProof(key, url, method, { nonce, ath } = {}) {
+  const header = { typ: 'dpop+jwt', alg: 'ES256', jwk: key.publicJwk };
+  const claims = { jti: random(12), htm: method, htu: url.origin + url.pathname, iat: Math.floor(Date.now() / 1000) };
+  if (nonce) claims.nonce = nonce;
+  if (ath) claims.ath = ath;
+  const input = `${b64u.str(JSON.stringify(header))}.${b64u.str(JSON.stringify(claims))}`;
+  const sig = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, key.privateKey, enc.encode(input));
+  return `${input}.${b64u.enc(sig)}`;
+}
+
+// Servers issue short-lived DPoP nonces; keep the latest per origin and retry once when
+// a request is rejected for using a missing or stale one.
+const dpopNonces = new Map();
+
+async function dpopFetch(url, { method = 'POST', form, body, contentType, key, token } = {}) {
+  const parsed = new URL(url);
+  let payload = body;
+  let type = contentType;
+  if (form) { payload = form.toString(); type = 'application/x-www-form-urlencoded'; }
+  if (payload instanceof Blob) type = payload.type;
+  else if (payload != null && !type) type = 'application/json';
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const nonce = dpopNonces.get(parsed.origin);
+    const headers = new Headers();
+    if (type) headers.set('Content-Type', type);
+    if (token) {
+      headers.set('Authorization', `DPoP ${token}`);
+      headers.set('DPoP', await dpopProof(key, parsed, method, { nonce, ath: await sha256(token) }));
+    } else {
+      headers.set('DPoP', await dpopProof(key, parsed, method, { nonce }));
+    }
+    const res = await fetch(url, { method, headers, body: payload });
+    const fresh = res.headers.get('dpop-nonce');
+    if (fresh) dpopNonces.set(parsed.origin, fresh);
+    if (attempt === 0 && fresh && res.status >= 400) {
+      const data = await res.clone().json().catch(() => null);
+      const text = `${data?.error || ''} ${data?.error_description || data?.message || ''}`;
+      if (!nonce || /nonce|dpop/i.test(text)) continue;
+    }
+    return res;
+  }
+}
+
+// IndexedDB holds the session and the DPoP key: CryptoKeys survive the redirect, and
+// tokens stay out of localStorage. Failures (private mode, file://) just mean no session.
+const DB_NAME = 'splitter', DB_STORE = 'kv';
+let dbPromise = null;
+function db() {
+  dbPromise ||= new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+  return dbPromise;
+}
+async function kvGet(key) {
+  try {
+    const d = await db();
+    return await new Promise((resolve, reject) => {
+      const r = d.transaction(DB_STORE).objectStore(DB_STORE).get(key);
+      r.onsuccess = () => resolve(r.result);
+      r.onerror = () => reject(r.error);
+    });
+  } catch { return null; }
+}
+async function kvSet(key, value) {
+  try {
+    const d = await db();
+    await new Promise((resolve, reject) => {
+      const tx = d.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
+async function kvDelete(key) {
+  try {
+    const d = await db();
+    await new Promise((resolve, reject) => {
+      const tx = d.transaction(DB_STORE, 'readwrite');
+      tx.objectStore(DB_STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
+
+// Handle -> DID -> DID document -> PDS, checking the handle is claimed by the DID.
+async function resolveIdentity(input) {
+  const handle = input.trim().replace(/^@/, '').toLowerCase();
+  if (!handle) throw new Error('Enter your handle first.');
+  const { did } = handle.startsWith('did:')
+    ? { did: handle }
+    : await getJson(`${PUBLIC_API}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(handle)}`);
+  const doc = did.startsWith('did:plc:')
+    ? await getJson(`https://plc.directory/${did}`)
+    : did.startsWith('did:web:')
+      ? await getJson(`https://${decodeURIComponent(did.slice(8)).replace(/:/g, '/')}/.well-known/did.json`)
+      : null;
+  if (!doc) throw new Error('Splitter supports did:plc and did:web accounts only.');
+  const alsoKnownAs = doc.alsoKnownAs || [];
+  if (!handle.startsWith('did:') && !alsoKnownAs.includes(`at://${handle}`)) {
+    throw new Error(`Couldn't verify that ${handle} belongs to ${did}.`);
+  }
+  const pds = (doc.service || []).find(s => s.id === '#atproto_pds')?.serviceEndpoint;
+  if (!pds) throw new Error('That account has no PDS listed in its DID document.');
+  const claimed = alsoKnownAs.find(a => a.startsWith('at://'));
+  return { did, handle: claimed ? claimed.slice(5) : handle, pds: pds.replace(/\/$/, '') };
+}
+
+// Resource server metadata -> authorization server metadata, cached for this page's life.
+const discovery = new Map();
+async function authServer(pds) {
+  if (!discovery.has(pds)) {
+    discovery.set(pds, (async () => {
+      const prm = await getJson(`${pds}/.well-known/oauth-protected-resource`);
+      const advertised = prm.authorization_servers?.[0];
+      if (!advertised) throw new Error('That PDS does not publish an authorization server.');
+      const base = advertised.replace(/\/$/, '');
+      const meta = await getJson(`${base}/.well-known/oauth-authorization-server`);
+      if (new URL(meta.issuer).origin !== new URL(base).origin) {
+        throw new Error('The authorization server metadata does not match its issuer.');
+      }
+      if (!meta.pushed_authorization_request_endpoint) {
+        throw new Error('That server does not support pushed authorization requests.');
+      }
+      if (!(meta.dpop_signing_alg_values_supported || []).includes('ES256')) {
+        throw new Error('That server does not support the required DPoP signing algorithm.');
+      }
+      return {
+        issuer: meta.issuer,
+        par: meta.pushed_authorization_request_endpoint,
+        authorize: meta.authorization_endpoint,
+        token: meta.token_endpoint,
+        pds,
+      };
+    })().catch(e => { discovery.delete(pds); throw e; }));
+  }
+  return discovery.get(pds);
+}
+
+let oauth = null;       // signed-in session
+let refreshing = null;  // single-flight token refresh
+
+async function startOAuth() {
+  const client = clientIdFor(location);
+  if (!client.ok) { showAuthIssue(client.reason); return; }
+  const handle = handleEl.value.trim();
+  if (!handle) { setAuthMsg('Enter your handle first.'); handleEl.focus(); return; }
+  oauthBtn.disabled = true;
+  setAuthMsg('Looking up your account…', 'muted');
+  try {
+    const id = await resolveIdentity(handle);
+    const as = await authServer(id.pds);
+    const key = await newDpopKey();
+    const verifier = random(32);
+    const state = random(16);
+    const body = new URLSearchParams({
+      client_id: client.clientId,
+      response_type: 'code',
+      redirect_uri: client.redirectUri,
+      scope: SCOPE,
+      state,
+      code_challenge: await sha256(verifier),
+      code_challenge_method: 'S256',
+      login_hint: handle,
+    });
+    const res = await dpopFetch(as.par, { form: body, key });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error_description || data.error || `Bluesky rejected the sign-in request (${res.status}).`);
+    }
+    await kvSet('oauth-flow', {
+      state, verifier, key,
+      did: id.did, handle: id.handle, pds: id.pds,
+      issuer: as.issuer, token: as.token,
+      clientId: client.clientId, redirectUri: client.redirectUri,
+      createdAt: Date.now(),
+    });
+    const url = `${as.authorize}?client_id=${encodeURIComponent(client.clientId)}` +
+      `&request_uri=${encodeURIComponent(data.request_uri)}`;
+    location.assign(url);
+  } catch (e) {
+    setAuthMsg(e.message);
+    oauthBtn.disabled = false;
+  }
+}
+
+async function finishOAuth() {
+  const params = new URLSearchParams(location.search);
+  if (!params.has('code') && !params.has('error')) return false;
+  history.replaceState(null, '', location.origin + location.pathname);
+  if (params.get('error')) {
+    setAuthMsg(`Sign-in was not completed (${params.get('error')}).`);
+    return true;
+  }
+  const flow = await kvGet('oauth-flow');
+  await kvDelete('oauth-flow');
+  if (!flow || flow.state !== params.get('state')) {
+    setAuthMsg('That sign-in link is stale or belongs to another window. Try again.');
+    return true;
+  }
+  if (Date.now() - flow.createdAt > 10 * 60 * 1000) {
+    setAuthMsg('That sign-in link expired. Try again.');
+    return true;
+  }
+  if (params.get('iss') !== flow.issuer) {
+    setAuthMsg('Sign-in returned from an unexpected server, so it was ignored.');
+    return true;
+  }
+  try {
+    const res = await dpopFetch(flow.token, {
+      key: flow.key,
+      form: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: params.get('code'),
+        redirect_uri: flow.redirectUri,
+        client_id: flow.clientId,
+        code_verifier: flow.verifier,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(data.error_description || data.error || `Bluesky could not finish sign-in (${res.status}).`);
+    }
+    if (data.sub !== flow.did) throw new Error('That sign-in authorized a different account. Try again.');
+    if (!(data.scope || '').split(' ').includes('atproto')) {
+      throw new Error('Bluesky did not grant the atproto scope, so nothing was saved.');
+    }
+    oauth = {
+      did: flow.did, handle: flow.handle, pds: flow.pds,
+      issuer: flow.issuer, clientId: flow.clientId, redirectUri: flow.redirectUri,
+      tokenEndpoint: flow.token,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresAt: Date.now() + (data.expires_in || 300) * 1000,
+      scope: data.scope,
+      key: flow.key,
+    };
+    await kvSet('oauth-session', oauth);
+    store.set('bsky-handle', flow.handle);
+    setAuthMsg('');
+  } catch (e) {
+    setAuthMsg(e.message);
+  }
+  return true;
+}
+
+async function doRefresh(session) {
+  const res = await dpopFetch(session.tokenEndpoint, {
+    key: session.key,
+    form: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: session.refreshToken,
+      client_id: session.clientId,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error_description || data.error || 'The Bluesky session has expired.');
+  session.accessToken = data.access_token;
+  if (data.refresh_token) session.refreshToken = data.refresh_token;
+  session.expiresAt = Date.now() + (data.expires_in || 300) * 1000;
+  if (data.scope) session.scope = data.scope;
+  await kvSet('oauth-session', session);
+  return session.accessToken;
+}
+
+async function freshToken(session) {
+  if (session.expiresAt - Date.now() > 60000) return session.accessToken;
+  refreshing ||= doRefresh(session).finally(() => { refreshing = null; });
+  return refreshing;
+}
+
+async function forgetSession() {
+  oauth = null;
+  refreshing = null;
+  dpopNonces.clear();
+  await kvDelete('oauth-session');
+  await kvDelete('oauth-flow');
+}
+
+async function oauthXrpc(method, body) {
+  const session = oauth;
+  const url = `${session.pds}/xrpc/${method}`;
+  const send = token => dpopFetch(url, {
+    key: session.key,
+    token,
+    body: body instanceof Blob ? body : JSON.stringify(body),
+    contentType: body instanceof Blob ? body.type : 'application/json',
+  });
+  let token;
+  try {
+    token = await freshToken(session);
+  } catch {
+    await forgetSession();
+    renderAuth();
+    throw new Error('Your Bluesky session expired. Sign in again.');
+  }
+  let res = await send(token);
+  if (res.status === 401) {
+    session.expiresAt = 0;
+    try {
+      token = await freshToken(session);
+    } catch {
+      await forgetSession();
+      renderAuth();
+      throw new Error('Your Bluesky session expired. Sign in again.');
+    }
+    res = await send(token);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || data.error_description || `${method} failed (${res.status})`);
+  return data;
+}
+
+// ---- Posting ----
+// Both sign-in methods reduce to { handle, did, xrpc(method, body) }.
+async function passwordAuth() {
+  const handle = handleEl.value.trim().replace(/^@/, '');
+  const password = passwordEl.value.trim();
+  if (!handle || !password) throw new Error('Sign in with Bluesky, or enter your handle and app password.');
+  const session = await xrpc(PDS_DEFAULT, 'com.atproto.server.createSession', { identifier: handle, password });
+  if (sessionScope(session.accessJwt) === 'com.atproto.access') {
+    passwordEl.value = '';
+    forgetPassword();
+    throw new Error('That is your account password. Use an app password instead, or sign in with Bluesky.');
+  }
+  const pds = session.didDoc?.service?.find(s => s.id === '#atproto_pds')?.serviceEndpoint || PDS_DEFAULT;
+  return {
+    handle,
+    did: session.did,
+    xrpc: (method, body) => xrpc(pds, method, body, session.accessJwt),
+  };
+}
+
+const getAuth = () => (oauth
+  ? { handle: oauth.handle, did: oauth.did, xrpc: oauthXrpc }
+  : passwordAuth());
+
+// The thread being posted: which posts are up, so a failure can be resumed.
+let thread = null;  // { key, posts, did, refs: [{uri, cid}], error }
+let busy = false;
+
+async function postThread() {
+  if (busy) return;
+  if (renderTimer) render();  // pick up any typing still waiting to re-split
+  busy = true;
+  threadMsg.textContent = 'Signing in…';
+  try {
+    // Set up the thread first, so a sign-in failure has somewhere to be reported.
+    const key = currentPosts.join('\0');
+    if (!thread || thread.key !== key) thread = { key, posts: currentPosts, refs: [] };
+    thread.error = null;
+    const auth = await getAuth();
+    const n = thread.posts.length, done = thread.refs.length;
+    const what = done ? `the remaining ${n - done} of ${n} posts` : `${n} post${n > 1 ? 's' : ''}`;
+    if (!confirm(`Post ${what} to Bluesky as @${auth.handle}?`)) return;
+
+    thread.did = auth.did;
+    updateThreadUI();
+    for (let i = thread.refs.length; i < n; i++) {
+      threadMsg.textContent = `Posting ${i + 1} of ${n}…`;
+      const text = thread.posts[i];
+      const record = { $type: 'app.bsky.feed.post', text, createdAt: new Date().toISOString() };
+      const f = facets(text);
+      if (f.length) record.facets = f;
+      if (i > 0) record.reply = { root: thread.refs[0], parent: thread.refs[i - 1] };
+      const imgs = media[i] || [];
+      if (imgs.length) {
+        threadMsg.textContent = `Uploading images for ${i + 1} of ${n}…`;
+        const images = [];
+        for (const m of imgs) {
+          const { blob } = await auth.xrpc('com.atproto.repo.uploadBlob', m.blob);
+          images.push({ alt: m.alt, image: blob, aspectRatio: { width: m.width, height: m.height } });
+        }
+        record.embed = { $type: 'app.bsky.embed.images', images };
+      } else {
+        const card = await linkCard(text, auth);
+        if (card) record.embed = card;
+      }
+      const { uri, cid } = await auth.xrpc('com.atproto.repo.createRecord',
+        { repo: auth.did, collection: 'app.bsky.feed.post', record });
+      thread.refs.push({ uri, cid });
+      updateThreadUI();
+    }
+  } catch (e) {
+    if (thread) thread.error = e.message;
+    else threadMsg.textContent = e.message;
+  } finally {
+    busy = false;
+    updateThreadUI();
+  }
+}
+
+// ---- UI ----
+const input = document.getElementById('input');
+const postsEl = document.getElementById('posts');
+const summary = document.getElementById('summary');
+const totalEl = document.getElementById('total');
+const handleEl = document.getElementById('handle');
+const passwordEl = document.getElementById('appPassword');
+const postBtn = document.getElementById('postBtn');
+const threadMsg = document.getElementById('threadMsg');
+const signInRow = document.getElementById('signInRow');
+const whoRow = document.getElementById('whoRow');
+const whoHandle = document.getElementById('whoHandle');
+const appPassDetails = document.getElementById('appPassDetails');
+const oauthBtn = document.getElementById('oauthBtn');
+const signOutBtn = document.getElementById('signOutBtn');
+const oauthNote = document.getElementById('oauthNote');
+const authMsg = document.getElementById('authMsg');
+const installBtn = document.getElementById('installBtn');
+let currentPosts = [];
+let statusEls = [];
+// Images attached to each post number: media[i] = [{ blob, url, alt, width, height }]
+const media = [];
+
+async function addImages(i, files) {
+  const list = (media[i] ||= []);
+  const skipped = [];
+  for (const f of files) {
+    if (list.length >= MAX_IMAGES) { skipped.push(`${f.name}: a post can have at most ${MAX_IMAGES} images`); continue; }
+    try {
+      const img = await shrink(f);
+      list.push({ ...img, url: URL.createObjectURL(img.blob), alt: '' });
+    } catch {
+      skipped.push(`${f.name}: the browser can't open this image (HEIC photos need converting to JPEG first)`);
+    }
+  }
+  render();
+  if (skipped.length) alert(`Some files weren't added:\n\n${skipped.join('\n')}`);
+}
+
+function updateThreadUI() {
+  const n = currentPosts.length;
+  const t = thread && thread.key === currentPosts.join('\0') ? thread : null;
+  const done = t ? t.refs.length : 0;
+  statusEls.forEach((el, i) => {
+    el.textContent = i < done ? '✓ Posted' : t?.error && i === done ? '✗ Failed' : '';
+    el.className = i < done ? 'ok' : 'err';
+  });
+  postBtn.disabled = busy || !n || done === n;
+  postBtn.textContent = done === n && n ? 'Posted' : done ? `Resume (${done} of ${n} posted)` : 'Post thread';
+  if (busy) return;  // postThread is showing progress
+  threadMsg.replaceChildren();
+  if (t?.error) {
+    threadMsg.innerHTML = '<span class="err"></span>';
+    threadMsg.firstChild.textContent = t.error;
+  } else if (n && done === n) {
+    const a = document.createElement('a');
+    a.href = `https://bsky.app/profile/${t.did}/post/${t.refs[0].uri.split('/').pop()}`;
+    a.target = '_blank';
+    a.textContent = 'View thread';
+    threadMsg.append(a);
+  }
+}
+
+function setAuthMsg(text, kind = 'err') {
+  authMsg.textContent = text || '';
+  authMsg.hidden = !text;
+  authMsg.className = kind === 'muted' ? 'note' : 'err-note';
+}
+
+function showAuthIssue(reason) {
+  oauthBtn.disabled = true;
+  oauthNote.replaceChildren();
+  const open = url => {
+    const a = document.createElement('a');
+    a.href = url;
+    a.textContent = url;
+    return a;
+  };
+  if (reason === 'localhost') {
+    const url = `http://127.0.0.1:${location.port || 80}${location.pathname}`;
+    oauthNote.append('Bluesky rejects "localhost" as a sign-in address. Open ', open(url), ' instead.');
+  } else if (reason === 'file') {
+    oauthNote.append('Signing in with Bluesky needs a local server: run ' +
+      'python3 -m http.server 8000 --bind 127.0.0.1 and open http://127.0.0.1:8000/. ' +
+      'An app password still works here.');
+  } else if (reason === 'hosted') {
+    oauthNote.append('Sign-in is set up for a local server only. Run it on 127.0.0.1, or use an app password.');
+  } else {
+    oauthNote.append('Signing in with Bluesky needs http://127.0.0.1 or https. An app password still works.');
+  }
+  oauthNote.hidden = false;
+}
+
+function renderAuth() {
+  const signedIn = !!oauth;
+  whoRow.hidden = !signedIn;
+  signInRow.hidden = signedIn;
+  appPassDetails.hidden = signedIn;
+  oauthNote.hidden = true;
+  oauthBtn.disabled = false;
+  if (signedIn) {
+    whoHandle.textContent = `@${oauth.handle}`;
+    handleEl.value = oauth.handle;
+  } else {
+    const client = clientIdFor(location);
+    if (!client.ok) showAuthIssue(client.reason);
+  }
+  updateThreadUI();
+}
+
+let renderTimer = null;
+
+const EMPTY = '<div class="empty">Paste text on the left to see it split into a thread here. ' +
+  'Drag images onto any post to attach them.</div>';
+const svg = d => `<svg viewBox="0 0 24 24">${d}</svg>`;
+const ICON = {
+  image: svg('<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>'),
+};
+
+function render() {
+  clearTimeout(renderTimer);
+  renderTimer = null;
+  const text = input.value;
+  totalEl.textContent = text.trim() ? `${glen(text.trim())} characters` : '';
+  const posts = split(text);
+  currentPosts = posts;
+  statusEls = [];
+  summary.textContent = posts.length ? `Thread · ${posts.length} post${posts.length > 1 ? 's' : ''}` : 'Thread';
+  postsEl.replaceChildren();
+  if (!posts.length) postsEl.innerHTML = EMPTY;
+  posts.forEach((p, i) => {
+    const len = glen(p);
+    const imgs = media[i] || [];
+    const card = document.createElement('div');
+    card.className = 'post';
+    card.innerHTML = `<div class="num">${i + 1}</div><div class="body"><div class="post-text"></div><div class="thumbs"></div>
+      <div class="post-foot"><span class="count${len > LIMIT ? ' over' : ''}">
+        <svg class="ring" viewBox="0 0 20 20"><circle class="track" cx="10" cy="10" r="8"/>
+        <circle class="fill" cx="10" cy="10" r="8" pathLength="100" stroke-dasharray="${Math.min(100, len / LIMIT * 100)} 100"/></svg>
+        ${len} / ${LIMIT}</span>
+      <span class="actions"><span></span><button class="icon add" title="Add image" aria-label="Add image">${ICON.image}</button></span></div></div>
+      <input type="file" accept="image/*" multiple hidden>`;
+    card.querySelector('.post-text').textContent = p;
+    statusEls.push(card.querySelector('.actions span'));
+
+    const fileIn = card.querySelector('input[type=file]');
+    const addBtn = card.querySelector('.add');
+    addBtn.disabled = imgs.length >= MAX_IMAGES;
+    addBtn.onclick = () => fileIn.click();
+    fileIn.onchange = () => addImages(i, fileIn.files);
+    card.ondragover = e => { e.preventDefault(); card.classList.add('drag'); };
+    card.ondragleave = e => { if (!card.contains(e.relatedTarget)) card.classList.remove('drag'); };
+    card.ondrop = e => { e.preventDefault(); card.classList.remove('drag'); addImages(i, e.dataTransfer.files); };
+
+    const thumbs = card.querySelector('.thumbs');
+    imgs.forEach((m, j) => {
+      const t = document.createElement('div');
+      t.className = 'thumb';
+      t.innerHTML = '<div class="pic"><img alt=""><button class="remove" title="Remove">×</button></div>' +
+        '<textarea placeholder="Alt text" maxlength="2000"></textarea>';
+      t.querySelector('img').src = m.url;
+      const alt = t.querySelector('textarea');
+      alt.value = m.alt;
+      alt.oninput = () => (m.alt = alt.value);
+      t.querySelector('.remove').onclick = () => { URL.revokeObjectURL(m.url); imgs.splice(j, 1); render(); };
+      thumbs.append(t);
+    });
+
+    postsEl.append(card);
+  });
+  updateThreadUI();
+}
+
+// The handle is always remembered; the app password only when "Remember" is ticked.
+const rememberEl = document.getElementById('remember');
+const store = {
+  get: k => { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
+  set: (k, v) => { try { localStorage.setItem(k, v); } catch {} },
+  remove: k => { try { localStorage.removeItem(k); } catch {} },
+};
+const forgetPassword = () => store.remove('bsky-app-password');
+const savePassword = () => { if (rememberEl.checked) store.set('bsky-app-password', passwordEl.value); };
+
+handleEl.addEventListener('input', () => store.set('bsky-handle', handleEl.value));
+passwordEl.addEventListener('input', savePassword);
+rememberEl.addEventListener('change', () => (rememberEl.checked ? savePassword() : forgetPassword()));
+
+oauthBtn.addEventListener('click', startOAuth);
+handleEl.addEventListener('keydown', e => { if (e.key === 'Enter') startOAuth(); });
+signOutBtn.addEventListener('click', async () => {
+  await forgetSession();
+  setAuthMsg('');
+  renderAuth();
+});
+
+// A file dropped outside a card would make the browser open it and lose the page.
+for (const type of ['dragover', 'drop']) {
+  window.addEventListener(type, e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
+}
+
+input.addEventListener('input', () => {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(render, 150);
+});
+postBtn.addEventListener('click', postThread);
+
+// ---- PWA ----
+let installPrompt = null;
+addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  installPrompt = e;
+  installBtn.hidden = false;
+});
+installBtn.addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => {});
+  installPrompt = null;
+  installBtn.hidden = true;
+});
+if (matchMedia('(display-mode: standalone)').matches || navigator.standalone) installBtn.hidden = true;
+
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}
+
+// ---- Boot ----
+(async () => {
+  handleEl.value = store.get('bsky-handle');
+  passwordEl.value = store.get('bsky-app-password');
+  rememberEl.checked = !!passwordEl.value;
+  oauth = await kvGet('oauth-session');
+  await finishOAuth();
+  render();
+  renderAuth();
+})();
+</script>
+</body>
+</html>

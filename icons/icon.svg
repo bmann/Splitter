@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Bluesky Splitter">
+  <rect width="512" height="512" rx="112" fill="#1083fe"/>
+  <g fill="#fff">
+    <rect x="112" y="148" width="288" height="56" rx="28"/>
+    <rect x="112" y="228" width="216" height="56" rx="28"/>
+    <rect x="112" y="308" width="144" height="56" rx="28"/>
+  </g>
+</svg>

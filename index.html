@@ -785,8 +785,8 @@ const SCOPE = [
   'blob?accept=image/jpeg&accept=image/png&accept=image/webp',
 ].join(' ');
 
-// Where this window's client identity comes from. Loopback is the only mode implemented;
-// a hosted deployment would publish client-metadata.json and return that URL here (issue #6).
+// Where this window's client identity comes from: the loopback client on 127.0.0.1, or the
+// hosted client-metadata.json document on HTTPS (the Pages deploy ships one at the app root).
 function clientIdFor(loc) {
   if (loc.protocol === 'file:') return { ok: false, reason: 'file' };
   if (loc.hostname === 'localhost') return { ok: false, reason: 'localhost' };
@@ -795,7 +795,16 @@ function clientIdFor(loc) {
     const query = new URLSearchParams({ redirect_uri: redirectUri, scope: SCOPE });
     return { ok: true, clientId: `http://localhost?${query}`, redirectUri };
   }
-  if (loc.protocol === 'https:') return { ok: false, reason: 'hosted' };
+  if (loc.protocol === 'https:') {
+    // The metadata document is the client_id; redirect to the app directory root, not
+    // index.html, so the metadata only needs one redirect URI.
+    const base = new URL('./', loc.href);
+    return {
+      ok: true,
+      clientId: new URL('client-metadata.json', base).href,
+      redirectUri: base.href,
+    };
+  }
   return { ok: false, reason: 'insecure' };
 }
 
@@ -1381,8 +1390,6 @@ function showAuthIssue(reason) {
     oauthNote.append('Signing in needs a local server: run ' +
       'python3 -m http.server 8000 --bind 127.0.0.1 and open http://127.0.0.1:8000/. ' +
       'An app password still works here.');
-  } else if (reason === 'hosted') {
-    oauthNote.append('Sign-in is set up for a local server only. Run it on 127.0.0.1, or use an app password.');
   } else {
     oauthNote.append('Signing in needs http://127.0.0.1 or https. An app password still works.');
   }

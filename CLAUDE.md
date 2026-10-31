@@ -5,7 +5,8 @@ Splits pasted text into a thread and posts it to Bluesky. See `README.md`.
 ## Working conventions
 - Keep the app one page: `index.html` holds all markup, styles and script, with no build step and no libraries. If one is ever needed, load it from a pinned CDN version. The PWA companion files (`manifest.webmanifest`, `sw.js`, `icons/`) and community `themes/` are the only other moving parts.
 - The page must keep working when opened from disk as a bare file; anything that needs an origin (sign-in, installation, community themes) degrades to the app-password/built-in path with an explanation.
-- OAuth is implemented directly against the atproto spec in `index.html`; don't add a client library. Keep the `clientIdFor()` seam — a hosted deployment needs its own branch there.
+- OAuth is implemented directly against the atproto spec in `index.html`; don't add a client library. `clientIdFor()` uses the loopback client on `127.0.0.1` and `<origin>/client-metadata.json` on HTTPS. The GitHub Pages deployment ships that document on `gh-pages`; any other host needs its own.
+- The GitHub Pages site is served from `gh-pages` (static files + `client-metadata.json` + `.nojekyll`). Copy app changes from `main` to that branch when deploying; the metadata document is host-specific.
 - Never cache cross-origin requests in `sw.js`, and never put tokens in local storage.
 - Mentions resolve to DIDs before `createRecord`; a failed lookup must always fall back to plain text. Typeahead queries are debounced and cached, and the service is a third party (`typeahead.waow.tech`), so keep the `X-Client` header set.
 - Link cards are fetched once while typing and reused at post time — never fetch `cardyb` again inside `postThread()`. A failed card fetch must never block splitting or posting, and the thumbnail slot must say why it is empty.

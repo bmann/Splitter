@@ -102,7 +102,13 @@ paint on the next visit.
 
 ## Use
 
-There are two ways to open it, and they differ in what sign-in they allow.
+There are a few ways to open it, and they differ in what sign-in they allow.
+
+### Hosted on GitHub Pages
+
+Open <https://bmann.github.io/Splitter/>. It installs as a PWA, works offline after the first load,
+and signs in with OAuth from that origin. The deployment is the static app on the `gh-pages` branch,
+with its own `client-metadata.json`.
 
 ### From a local server (OAuth works here)
 
@@ -132,9 +138,9 @@ cannot read your timeline, change your profile, or delete posts.
 
 A few things are worth knowing:
 
-- The consent screen shows `http://localhost?…` rather than a familiar app name. That is the
-  loopback client identifier the atproto spec uses for local apps; Bluesky doesn't show metadata for
-  clients it hasn't seen before. The long URL is the permission request itself.
+- The consent screen shows `http://localhost?…` on loopback and the `client-metadata.json` URL on
+  the hosted site, rather than a familiar app name. Bluesky doesn't render metadata for clients it
+  hasn't seen before. The URL is the permission request itself.
 - Sessions last about two weeks. When one expires, Splitter asks you to sign in again.
 - The session belongs to the address you signed in at. Changing the port means signing in again.
 - On an iPhone or iPad, sign in from a Safari tab before adding the app to the home screen. A
@@ -159,15 +165,21 @@ OAuth tokens and the signing key live in IndexedDB, never in local storage.
 
 There is no client library; the app speaks the protocol directly.
 
-- The client identifier is the loopback form `http://localhost?redirect_uri=…&scope=…`, which is why
-  no hosting is required.
+- The client identifier is the loopback form `http://localhost?redirect_uri=…&scope=…` on
+  `127.0.0.1`, and `<origin>/client-metadata.json` on HTTPS. The GitHub Pages deploy ships that
+  document; any other host needs its own.
 - Login uses pushed authorization requests and PKCE.
 - Tokens are bound to a non-extractable ECDSA P-256 key (DPoP) that never leaves the browser.
 - The scopes requested are `atproto` plus `include:app.bsky.authCreatePosts` and a blob scope for
   image uploads — no `transition:generic`.
 
-Serving it anywhere other than `127.0.0.1` will need a hosted `client-metadata.json`; the app has the
-seam for that but no hosted client yet.
+## Deployment
+
+The hosted version is served by GitHub Pages from the `gh-pages` branch at
+<https://bmann.github.io/Splitter/>. That branch is the static app plus `client-metadata.json` and
+`.nojekyll`; there is no build step or server. To deploy an app change, copy the files from `main`
+to the branch and push. The metadata document is host-specific: a fork at another origin needs its
+own `client_id` and `redirect_uris`.
 
 ## Layout
 
@@ -178,6 +190,7 @@ seam for that but no hosted client yet.
 | `sw.js` | service worker caching the app shell |
 | `icons/` | SVG sources and generated PNGs |
 | `themes/` | theme format, schema, example and community themes |
+| `client-metadata.json` | hosted OAuth client document, on the `gh-pages` branch |
 | `docs/screenshots/` | images used in this README |
 
 ## Development

@@ -114,6 +114,40 @@
     border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
   }
   .theme-row select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+  /* Inline tags: thread-wide on the left, per-post overrides in the preview. */
+  .tags-panel {
+    flex: none; margin-top: 10px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: 12px;
+    background: var(--panel); box-shadow: var(--shadow);
+  }
+  .tags-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+  .tags-head label { font-size: 13px; font-weight: 600; color: var(--text); }
+  .tags-hint { font-size: 12px; color: var(--muted); }
+  .chips { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+  .tags-panel .chips:not(:empty) { margin-bottom: 6px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px;
+    border-radius: 999px; background: var(--accent-soft); color: var(--accent);
+    font-size: 12px; line-height: 1.5;
+  }
+  .chip button {
+    padding: 0 0 0 2px; border: none; background: transparent; color: inherit;
+    font-size: 14px; line-height: 1; cursor: pointer;
+  }
+  .chip button:hover { color: var(--warn); }
+  .tag-input, .tag-add {
+    width: 100%; padding: 5px 8px; font: inherit; font-size: 13px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
+  }
+  .tag-input:focus, .tag-add:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .post-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+  .post-tags .chips { margin: 0; }
+  .post-tags .tag-add {
+    width: 92px; padding: 2px 8px; border-style: dashed; border-radius: 999px;
+    font-size: 12px; color: var(--muted);
+  }
+  .post-tags .tag-add:focus { color: var(--text); }
   .fields { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
   .fields > input {
     width: 180px; padding: 7px 12px; font: inherit; font-size: 14px;
@@ -373,6 +407,15 @@
   <div class="col">
     <div class="col-head"><span>Your text</span><span id="total"></span></div>
     <textarea id="input" placeholder="Paste your text here…" autofocus></textarea>
+    <div class="tags-panel">
+      <div class="tags-head">
+        <label for="threadTagInput">Tags for every post</label>
+        <span class="tags-hint">Enter or comma</span>
+      </div>
+      <div class="chips" id="threadTagChips"></div>
+      <input id="threadTagInput" class="tag-input" placeholder="Add a tag, e.g. #bluesky"
+        autocomplete="off" spellcheck="false">
+    </div>
   </div>
   <div class="col">
     <div class="col-head"><span id="summary">Thread</span></div>
@@ -459,13 +502,13 @@ function solve(tokens, k, limit) {
 }
 
 // Split text into posts (Bluesky shows thread position itself).
-function split(text) {
+function split(text, limit = LIMIT) {
   const tokens = tokenize(text);
   if (!tokens.length) return [];
   const total = tokens.reduce((s, t) => s + t.len + t.sep.length, 0);
   let best = null, firstK = null;
-  for (let k = Math.max(1, Math.ceil(total / LIMIT)); k <= tokens.length; k++) {
-    const r = solve(tokens, k, LIMIT);
+  for (let k = Math.max(1, Math.ceil(total / limit)); k <= tokens.length; k++) {
+    const r = solve(tokens, k, limit);
     if (!r) continue;
     if (firstK === null) firstK = k;
     if (!best || r.cost < best.cost) best = r;
@@ -1190,14 +1233,19 @@ let busy = false;
 async function postThread() {
   if (busy) return;
   if (renderTimer) render();  // pick up any typing still waiting to re-split
+  const posts = finalPosts();
+  if (posts.some(p => glen(p) > LIMIT)) {
+    threadMsg.textContent = 'A post is over 300 characters. Remove a tag or shorten the text.';
+    return;
+  }
   busy = true;
   threadMsg.textContent = 'Signing in…';
   try {
     // Set up the thread first, so a sign-in failure has somewhere to be reported.
-    const key = currentPosts.join('\0');
+    const key = posts.join('\0');
     if (!thread || thread.key !== key) {
       thread = {
-        key, posts: currentPosts, refs: [], root: continuation?.root || null,
+        key, posts, refs: [], root: continuation?.root || null,
         parent: continuation?.parent || null,
       };
       if (!continuation) history = [];  // a fresh thread, not an extension
@@ -1278,8 +1326,188 @@ const media = [];
 // Pinned previews by post number: pins[i] = { url }. Lets the URL text be deleted without
 // losing the embed. Like media, a pin follows the post slot, and the preview shows where it sits.
 const pins = [];
+// Tags: thread-wide tags apply to every post; per-post additions and removals are indexed by
+// post slot, like media and pins. Tags are appended to the post text so facets() handles them.
+let threadTags = [];              // display strings without '#'
+const postTagAdds = [];           // per post: tags added just to that post
+const postTagRemovals = [];       // per post: thread tags removed from that post
+const tagDrafts = [];             // per post: uncommitted tag input text
+const threadTagInput = document.getElementById('threadTagInput');
+const threadTagChips = document.getElementById('threadTagChips');
+const tagKey = tag => tag.toLowerCase();
 
-const liveThread = () => (thread && thread.key === currentPosts.join('\0') ? thread : null);
+const liveThread = () => (thread && thread.key === finalPosts().join('\0') ? thread : null);
+
+function normalizeTag(raw) {
+  let tag = String(raw).trim().replace(/^#+/, '').replace(/[.,;:!?()]+$/, '');
+  if (!tag || /\s/.test(tag) || /#/.test(tag) || !/^[^\s#.,;:!?()]+$/.test(tag)) return null;
+  if (/^\d+$/.test(tag) || glen(tag) > 64) return null;
+  return tag;
+}
+
+function parseTags(raw) {
+  const tags = [];
+  for (const part of String(raw).split(/[\s,]+/)) {
+    const tag = normalizeTag(part);
+    if (tag && !tags.some(t => tagKey(t) === tagKey(tag))) tags.push(tag);
+  }
+  return tags;
+}
+
+function bodyTagKeys(text) {
+  return new Set(segments(text, null).filter(s => s.kind === 'tag').map(s => tagKey(s.tag)));
+}
+
+function effectiveTags(i) {
+  const removed = new Set((postTagRemovals[i] || []).map(tagKey));
+  const tags = threadTags.filter(t => !removed.has(tagKey(t)));
+  for (const tag of postTagAdds[i] || []) {
+    if (!tags.some(t => tagKey(t) === tagKey(tag))) tags.push(tag);
+  }
+  return tags;
+}
+
+// Tags already present in the body are not appended again; body hashtags stay user-owned text.
+function appendedTags(i) {
+  const present = bodyTagKeys(currentPosts[i] || '');
+  return effectiveTags(i).filter(t => !present.has(tagKey(t)));
+}
+
+function tagSuffix(i) {
+  const tags = appendedTags(i);
+  return tags.length ? ' ' + tags.map(t => '#' + t).join(' ') : '';
+}
+
+const finalPost = i => (currentPosts[i] || '') + tagSuffix(i);
+const finalPosts = () => currentPosts.map((_, i) => finalPost(i));
+
+function tagChip(tag, onRemove) {
+  const chip = document.createElement('span');
+  chip.className = 'chip';
+  chip.append(`#${tag}`);
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.textContent = '×';
+  remove.title = `Remove #${tag}`;
+  remove.setAttribute('aria-label', `Remove #${tag}`);
+  remove.onclick = onRemove;
+  chip.append(remove);
+  return chip;
+}
+
+function renderThreadTags() {
+  threadTagChips.replaceChildren(...threadTags.map(tag => tagChip(tag, () => removeThreadTag(tag))));
+}
+
+function renderPostTags(container, i) {
+  container.replaceChildren();
+  const tags = appendedTags(i);
+  if (tags.length) {
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    for (const tag of tags) chips.append(tagChip(tag, () => removePostTag(i, tag)));
+    container.append(chips);
+  }
+  const add = document.createElement('input');
+  add.type = 'text';
+  add.className = 'tag-add';
+  add.placeholder = '+ tag';
+  add.autocomplete = 'off';
+  add.spellcheck = false;
+  add.value = tagDrafts[i] || '';
+  add.setAttribute('aria-label', `Add a tag to post ${i + 1}`);
+  add.oninput = () => { tagDrafts[i] = add.value; };
+  add.onkeydown = e => {
+    if (e.key === 'Enter' || e.key === ',') {
+      e.preventDefault();
+      addPostTag(i, add.value);
+    } else if (e.key === 'Escape') {
+      tagDrafts[i] = '';
+      add.value = '';
+      add.blur();
+    }
+  };
+  add.onblur = () => { if (add.value.trim()) addPostTag(i, add.value); };
+  container.append(add);
+}
+
+function commitThreadTags(raw) {
+  const tags = parseTags(raw);
+  threadTagInput.value = '';
+  if (!tags.length) return;
+  const added = new Set();
+  for (const tag of tags) {
+    const key = tagKey(tag);
+    if (threadTags.some(t => tagKey(t) === key)) continue;
+    threadTags.push(tag);
+    added.add(key);
+  }
+  if (!added.size) return;
+  // A new thread-wide tag applies everywhere: clear per-post removals and additions for it.
+  for (const list of postTagRemovals) {
+    if (list) for (let j = list.length - 1; j >= 0; j--) if (added.has(tagKey(list[j]))) list.splice(j, 1);
+  }
+  for (const list of postTagAdds) {
+    if (list) for (let j = list.length - 1; j >= 0; j--) if (added.has(tagKey(list[j]))) list.splice(j, 1);
+  }
+  render();
+}
+
+function removeThreadTag(tag) {
+  const key = tagKey(tag);
+  threadTags = threadTags.filter(t => tagKey(t) !== key);
+  // Per-post exclusions are moot once the tag is no longer thread-wide; explicit additions stay.
+  for (const list of postTagRemovals) {
+    if (list) for (let j = list.length - 1; j >= 0; j--) if (tagKey(list[j]) === key) list.splice(j, 1);
+  }
+  render();
+}
+
+function addPostTag(i, raw) {
+  const tags = parseTags(raw);
+  if (!tags.length) return;
+  const globalKeys = new Set(threadTags.map(tagKey));
+  const present = bodyTagKeys(currentPosts[i] || '');
+  for (const tag of tags) {
+    const key = tagKey(tag);
+    if (present.has(key)) continue;  // already in the body, so appending it would duplicate
+    if (globalKeys.has(key)) {
+      const removals = (postTagRemovals[i] ||= []);
+      for (let j = removals.length - 1; j >= 0; j--) if (tagKey(removals[j]) === key) removals.splice(j, 1);
+    } else {
+      const adds = (postTagAdds[i] ||= []);
+      if (!adds.some(t => tagKey(t) === key)) adds.push(tag);
+      const removals = postTagRemovals[i];
+      if (removals) for (let j = removals.length - 1; j >= 0; j--) if (tagKey(removals[j]) === key) removals.splice(j, 1);
+    }
+  }
+  tagDrafts[i] = '';
+  render();
+}
+
+function removePostTag(i, tag) {
+  const key = tagKey(tag);
+  const adds = postTagAdds[i];
+  if (adds) for (let j = adds.length - 1; j >= 0; j--) if (tagKey(adds[j]) === key) adds.splice(j, 1);
+  if (threadTags.some(t => tagKey(t) === key)) {
+    const removals = (postTagRemovals[i] ||= []);
+    if (!removals.some(t => tagKey(t) === key)) removals.push(tag);
+  }
+  render();
+}
+
+threadTagInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    commitThreadTags(threadTagInput.value);
+  } else if (e.key === 'Escape') {
+    threadTagInput.value = '';
+    threadTagInput.blur();
+  }
+});
+threadTagInput.addEventListener('blur', () => {
+  if (threadTagInput.value.trim()) commitThreadTags(threadTagInput.value);
+});
 
 function clearMedia() {
   for (const list of media) {
@@ -1294,6 +1522,11 @@ function resetComposer() {
   thread = null;
   clearMedia();
   pins.length = 0;
+  threadTags = [];
+  postTagAdds.length = 0;
+  postTagRemovals.length = 0;
+  tagDrafts.length = 0;
+  threadTagInput.value = '';
   closeSuggest();
 }
 
@@ -1339,6 +1572,7 @@ function updateThreadUI() {
   const t = liveThread();
   const done = t ? t.refs.length : 0;
   const complete = !!(t && n && done === n && !t.error);
+  const over = finalPosts().some(p => glen(p) > LIMIT);
   statusEls.forEach((el, i) => {
     el.textContent = i < done ? '✓ Posted' : t?.error && i === done ? '✗ Failed' : '';
     el.className = i < done ? 'ok' : 'err';
@@ -1346,7 +1580,7 @@ function updateThreadUI() {
   postBtn.hidden = complete;
   afterPost.hidden = !complete;
   newThreadBtn.disabled = continueBtn.disabled = busy;
-  postBtn.disabled = busy || !n || done === n;
+  postBtn.disabled = busy || !n || done === n || over;
   postBtn.textContent = done === n && n ? 'Posted'
     : done ? `Resume (${done} of ${n} posted)`
     : continuation ? `Post ${n > 1 ? 'replies' : 'reply'}` : 'Post thread';
@@ -1355,6 +1589,9 @@ function updateThreadUI() {
   if (t?.error) {
     threadMsg.innerHTML = '<span class="err"></span>';
     threadMsg.firstChild.textContent = t.error;
+  } else if (over) {
+    threadMsg.innerHTML = '<span class="err"></span>';
+    threadMsg.firstChild.textContent = 'A post is over 300 characters. Remove a tag or shorten the text.';
   } else if (complete) {
     const root = t.root || t.refs[0];
     const a = document.createElement('a');
@@ -1842,7 +2079,9 @@ function render() {
   renderTimer = null;
   const text = input.value;
   totalEl.textContent = text.trim() ? `${glen(text.trim())} characters` : '';
-  const posts = split(text);
+  const threadSuffix = threadTags.length ? ' ' + threadTags.map(t => '#' + t).join(' ') : '';
+  const bodyLimit = Math.max(1, LIMIT - glen(threadSuffix));
+  const posts = split(text, bodyLimit);
   currentPosts = posts;
   statusEls = [];
   const t = liveThread();
@@ -1865,19 +2104,21 @@ function render() {
     empty.textContent = continuation ? EMPTY_CONT : EMPTY;
     postsEl.append(empty);
   }
-  posts.forEach((p, i) => {
-    const len = glen(p);
+  posts.forEach((_, i) => {
+    const postText = finalPost(i);
+    const len = glen(postText);
     const imgs = media[i] || [];
     const card = document.createElement('div');
     card.className = 'post';
-    card.innerHTML = `<div class="num">${i + 1}</div><div class="body"><div class="post-text"></div><div class="thumbs"></div><div class="card-slot"></div>
+    card.innerHTML = `<div class="num">${i + 1}</div><div class="body"><div class="post-text"></div><div class="post-tags"></div><div class="thumbs"></div><div class="card-slot"></div>
       <div class="post-foot"><span class="count${len > LIMIT ? ' over' : ''}">
         <svg class="ring" viewBox="0 0 20 20"><circle class="track" cx="10" cy="10" r="8"/>
         <circle class="fill" cx="10" cy="10" r="8" pathLength="100" stroke-dasharray="${Math.min(100, len / LIMIT * 100)} 100"/></svg>
         ${len} / ${LIMIT}</span>
       <span class="actions"><span></span><button class="icon add" title="Add image" aria-label="Add image">${ICON.image}</button></span></div></div>
       <input type="file" accept="image/*" multiple hidden>`;
-    richText(card.querySelector('.post-text'), p, mentionDids);
+    richText(card.querySelector('.post-text'), postText, mentionDids);
+    renderPostTags(card.querySelector('.post-tags'), i);
     statusEls.push(card.querySelector('.actions span'));
 
     const fileIn = card.querySelector('input[type=file]');
@@ -1904,11 +2145,12 @@ function render() {
     });
 
     // A preview is only possible when the post has no images: images win in the record.
-    if (!imgs.length) renderPreview(card.querySelector('.card-slot'), i, p);
+    if (!imgs.length) renderPreview(card.querySelector('.card-slot'), i, postText);
 
     postsEl.append(card);
   });
   primeMentions(posts);
+  renderThreadTags();
   updateThreadUI();
 }
 

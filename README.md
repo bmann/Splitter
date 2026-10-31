@@ -35,6 +35,16 @@ All three become facets that Bluesky renders as links. Typing `@` searches accou
 stores the pick with its DID; hand-typed handles resolve the same way. A handle that doesn't resolve
 stays plain text instead of failing the post.
 
+### Tags on every post
+
+![Thread-wide and per-post tag chips in the composer](docs/screenshots/tags.png)
+
+Add tags in the left panel once and they are appended to every post in the thread. In the preview,
+use **+ tag** to add one to a single post, or **×** to remove a thread-wide tag from just that post.
+Tags become normal hashtag facets, count toward the 300-character limit, and the splitter reserves
+space for the thread-wide set. A tag already typed in the post body is not appended again;
+per-post tags that push a post over the limit are flagged and block posting.
+
 ### Link previews
 
 ![A link card preview under a post](docs/screenshots/link-card.png)

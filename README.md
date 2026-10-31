@@ -1,5 +1,8 @@
 # Atmosphere Splitter
 
+> [!NOTE]
+> This is a fork of Scott Jenson's [Splitter](https://github.com/scottjenson/Splitter). The feature list includes the original work by @scottjenson as well as the features added here. Please credit Scott if you further fork this. 
+
 A single web page that splits a chunk of text into a thread and posts it in one go. It can be
 installed as an app, and it signs in with atproto OAuth (or an app password, if you prefer).
 

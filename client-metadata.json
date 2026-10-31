@@ -15,5 +15,6 @@
   ],
   "scope": "atproto include:app.bsky.authCreatePosts blob?accept=image/jpeg&accept=image/png&accept=image/webp",
   "application_type": "web",
+  "token_endpoint_auth_method": "none",
   "dpop_bound_access_tokens": true
 }

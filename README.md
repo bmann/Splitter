@@ -5,7 +5,8 @@ installed as an app, and it signs in with Bluesky's OAuth (or an app password, i
 
 - **Smart splitting.** Posts break at sentence boundaries where possible, with lengths kept roughly even. Word breaks are a fallback, used only when sentence breaks would leave a post very short or over the 300-character limit. Paragraph breaks are preferred but not forced.
 - **Images.** Add up to 4 images per post, with alt text. Large images are resized to fit Bluesky's 1 MB limit.
-- **Links, hashtags and mentions.** All three are made clickable. Typing `@` searches accounts as you type and stores the pick with its DID; hand-typed handles are resolved the same way. A handle that doesn't resolve stays plain text instead of failing the post. The first link in a post without images also gets a preview card.
+- **Links, hashtags and mentions.** All three are made clickable. Typing `@` searches accounts as you type and stores the pick with its DID; hand-typed handles are resolved the same way. A handle that doesn't resolve stays plain text instead of failing the post.
+- **Link previews in the composer.** The first link in a post without images shows a card as you type — the same card that gets posted, fetched once through `cardyb`. Use × to drop it, so a bad preview never gets embedded. A card with no image says `cardyb returned no image`; a URL with no preview says so instead of leaving a blank.
 - **One-click threads.** If posting fails partway, the button resumes from where it stopped instead of starting over.
 
 ## Use

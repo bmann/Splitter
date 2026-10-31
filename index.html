@@ -154,6 +154,40 @@
     background: rgba(0, 0, 0, 0.6); color: #fff; border: none;
   }
 
+  /* Link preview: the card fetched while typing is the embed that gets posted. */
+  .card-slot:not(:empty) { margin-top: 10px; }
+  .card {
+    position: relative; overflow: hidden; border: 1px solid var(--border);
+    border-radius: 10px; background: var(--bg);
+  }
+  .card .card-img { position: relative; background: var(--panel); }
+  .card .card-img img { width: 100%; aspect-ratio: 1.91 / 1; object-fit: cover; display: block; }
+  .card .card-img.noimg {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 64px; padding: 10px; font-size: 12px; color: var(--muted);
+  }
+  .card .card-body { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; }
+  .card .card-host { font-size: 11px; color: var(--muted); }
+  .card .card-title { font-size: 14px; font-weight: 600; line-height: 1.25; }
+  .card .card-desc {
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    font-size: 13px; line-height: 1.35; color: var(--muted);
+  }
+  .card .drop {
+    position: absolute; top: 6px; right: 6px; z-index: 1; padding: 0 7px;
+    background: rgba(0, 0, 0, 0.6); color: #fff; border: none;
+  }
+  .card .thumb-warn {
+    position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 8px;
+    background: rgba(0, 0, 0, 0.66); color: #fff; font-size: 11px;
+  }
+  .card-note {
+    padding: 10px; border: 1px dashed var(--border); border-radius: 10px;
+    font-size: 12px; color: var(--muted);
+  }
+  .card-off { margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .card-off button { padding: 0; border: none; font-size: 12px; }
+
   /* Handle completion, anchored under the caret. */
   .suggest {
     position: absolute; z-index: 10; width: min(360px, calc(100vw - 16px));
@@ -380,26 +414,77 @@ async function shrink(blob) {
   }
 }
 
-// Preview card for the first URL in a post, via the service Bluesky's own app uses.
-// Optional: any failure just means no card.
-async function linkCard(text, auth) {
+// ---- Link previews ----
+// A post's first URL gets a card, fetched once while typing and reused at post time, so the
+// preview is exactly what gets embedded. cardyb is the service Bluesky's own app uses.
+const CARD_API = 'https://cardyb.bsky.app/v1/extract';
+const cards = new Map();     // url -> { state: 'loading' | 'ready' | 'empty' | 'failed', data, blob, thumbError, promise }
+const cardsOff = new Set();  // urls whose preview the user dropped
+
+const firstUrl = text => {
   const m = text.match(URL_RE);
-  if (!m) return null;
-  const uri = trimUrl(m[0]);
-  try {
-    const d = await (await fetch(`https://cardyb.bsky.app/v1/extract?url=${encodeURIComponent(uri)}`)).json();
-    if (d.error || !d.title) return null;
-    const external = { uri, title: d.title, description: d.description || '' };
-    if (d.image) {
-      try {
-        const img = await shrink(await (await fetch(d.image)).blob());
-        external.thumb = (await auth.xrpc('com.atproto.repo.uploadBlob', img.blob)).blob;
-      } catch {}
+  return m ? trimUrl(m[0]) : null;
+};
+
+function hostOf(uri) {
+  try { return new URL(uri).hostname.replace(/^www\./, ''); } catch { return uri; }
+}
+
+function loadCard(url) {
+  let entry = cards.get(url);
+  if (entry) return entry;
+  entry = { state: 'loading' };
+  cards.set(url, entry);
+  entry.promise = (async () => {
+    try {
+      const d = await getJson(`${CARD_API}?url=${encodeURIComponent(url)}`);
+      if (d.error || !d.title) {
+        entry.state = 'empty';
+      } else {
+        entry.state = 'ready';
+        entry.data = {
+          uri: url,
+          title: d.title,
+          description: d.description || '',
+          image: d.image || '',
+          host: hostOf(url),
+        };
+        if (d.image) {
+          // Fetch the thumbnail now so a CORS-blocked image is visible before posting, not after.
+          try {
+            entry.blob = await (await fetch(d.image)).blob();
+          } catch {
+            entry.thumbError = 'the image could not be fetched';
+          }
+        }
+      }
+    } catch {
+      entry.state = 'failed';
+    } finally {
+      entry.settled = true;
+      if (!busy) scheduleRender(0);  // paint the card when it lands
     }
-    return { $type: 'app.bsky.embed.external', external };
-  } catch {
-    return null;
+  })();
+  return entry;
+}
+
+// Post-time card: reuse the preview's fetch. A dropped, missing or failed card means no embed.
+async function linkCard(text, auth) {
+  const uri = firstUrl(text);
+  if (!uri || cardsOff.has(uri)) return null;
+  const entry = loadCard(uri);
+  if (!entry.settled) {
+    await Promise.race([entry.promise, new Promise(r => setTimeout(r, 4000))]);
   }
+  if (entry.state !== 'ready') return null;
+  const external = { uri: entry.data.uri, title: entry.data.title, description: entry.data.description };
+  if (entry.blob) {
+    try {
+      const img = await shrink(entry.blob);
+      external.thumb = (await auth.xrpc('com.atproto.repo.uploadBlob', img.blob)).blob;
+    } catch {}  // the text card still posts; the preview warned about the thumbnail
+  }
+  return { $type: 'app.bsky.embed.external', external };
 }
 
 // Spans of text that Bluesky renders as links, tags or mentions, as UTF-16 indices into the
@@ -1089,6 +1174,94 @@ function richText(el, text, dids) {
   if (at < text.length) el.append(text.slice(at));
 }
 
+// Paint the link card (or why there isn't one) for a post that has a URL and no images.
+function renderCard(slot, url) {
+  slot.replaceChildren();
+  if (cardsOff.has(url)) {
+    const row = document.createElement('div');
+    row.className = 'card-off';
+    row.append('Link preview off. ');
+    const show = document.createElement('button');
+    show.type = 'button';
+    show.textContent = 'Show preview';
+    show.onclick = () => { cardsOff.delete(url); render(); };
+    row.append(show);
+    slot.append(row);
+    return;
+  }
+  const entry = cards.get(url);
+  if (!entry || entry.state === 'loading') {
+    const note = document.createElement('div');
+    note.className = 'card-note';
+    note.textContent = `Checking link… ${hostOf(url)}`;
+    slot.append(note);
+    return;
+  }
+  if (entry.state !== 'ready') {
+    const note = document.createElement('div');
+    note.className = 'card-note';
+    note.textContent = 'no preview available';
+    slot.append(note);
+    return;
+  }
+
+  const { data } = entry;
+  const card = document.createElement('div');
+  card.className = 'card';
+
+  const drop = document.createElement('button');
+  drop.type = 'button';
+  drop.className = 'drop';
+  drop.title = 'Remove link preview';
+  drop.setAttribute('aria-label', 'Remove link preview');
+  drop.textContent = '×';
+  drop.onclick = () => { cardsOff.add(url); render(); };
+
+  const image = document.createElement('div');
+  if (!data.image) {
+    image.className = 'card-img noimg';
+    image.textContent = 'cardyb returned no image';
+  } else {
+    image.className = 'card-img';
+    const img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    img.referrerPolicy = 'no-referrer';
+    img.src = data.image;
+    img.onerror = () => {
+      img.remove();
+      image.className = 'card-img noimg';
+      image.textContent = 'preview image unavailable';
+    };
+    image.append(img);
+    if (entry.thumbError) {
+      const warn = document.createElement('div');
+      warn.className = 'thumb-warn';
+      warn.textContent = "image couldn't be fetched, so it won't be attached";
+      image.append(warn);
+    }
+  }
+
+  const body = document.createElement('div');
+  body.className = 'card-body';
+  const host = document.createElement('div');
+  host.className = 'card-host';
+  host.textContent = data.host;
+  const title = document.createElement('div');
+  title.className = 'card-title';
+  title.textContent = data.title;
+  body.append(host, title);
+  if (data.description) {
+    const desc = document.createElement('div');
+    desc.className = 'card-desc';
+    desc.textContent = data.description;
+    body.append(desc);
+  }
+
+  card.append(drop, image, body);
+  slot.append(card);
+}
+
 // Look up hand-typed mentions so the preview can highlight them too.
 function primeMentions(posts) {
   for (const handle of new Set(posts.flatMap(handlesIn))) {
@@ -1120,7 +1293,7 @@ function render() {
     const imgs = media[i] || [];
     const card = document.createElement('div');
     card.className = 'post';
-    card.innerHTML = `<div class="num">${i + 1}</div><div class="body"><div class="post-text"></div><div class="thumbs"></div>
+    card.innerHTML = `<div class="num">${i + 1}</div><div class="body"><div class="post-text"></div><div class="thumbs"></div><div class="card-slot"></div>
       <div class="post-foot"><span class="count${len > LIMIT ? ' over' : ''}">
         <svg class="ring" viewBox="0 0 20 20"><circle class="track" cx="10" cy="10" r="8"/>
         <circle class="fill" cx="10" cy="10" r="8" pathLength="100" stroke-dasharray="${Math.min(100, len / LIMIT * 100)} 100"/></svg>
@@ -1152,6 +1325,15 @@ function render() {
       t.querySelector('.remove').onclick = () => { URL.revokeObjectURL(m.url); imgs.splice(j, 1); render(); };
       thumbs.append(t);
     });
+
+    // A card is only possible when the post has no images: images win in the record.
+    if (!imgs.length) {
+      const url = firstUrl(p);
+      if (url) {
+        loadCard(url);
+        renderCard(card.querySelector('.card-slot'), url);
+      }
+    }
 
     postsEl.append(card);
   });

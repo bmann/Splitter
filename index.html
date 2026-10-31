@@ -169,7 +169,7 @@
   .card .card-img img { width: 100%; aspect-ratio: 1.91 / 1; object-fit: cover; display: block; }
   .card .card-img.noimg {
     display: flex; align-items: center; justify-content: center;
-    min-height: 64px; padding: 10px; font-size: 12px; color: var(--muted);
+    min-height: 64px; padding: 10px 64px; font-size: 12px; color: var(--muted);
   }
   .card .card-body { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; }
   .card .card-host { font-size: 11px; color: var(--muted); }
@@ -182,6 +182,16 @@
     position: absolute; top: 6px; right: 6px; z-index: 1; padding: 0 7px;
     background: rgba(0, 0, 0, 0.6); color: #fff; border: none;
   }
+  .card .pin {
+    position: absolute; top: 6px; right: 38px; z-index: 1; display: grid; place-items: center;
+    padding: 3px 6px; background: rgba(0, 0, 0, 0.6); color: #fff; border: none;
+  }
+  .card .pin.on { background: var(--accent); }
+  .card .pin svg {
+    width: 14px; height: 14px; fill: none; stroke: currentColor;
+    stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+  }
+  .pinned-badge { display: block; margin-bottom: 2px; font-size: 11px; font-weight: 600; color: var(--accent); }
   .card .thumb-warn {
     position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 8px;
     background: rgba(0, 0, 0, 0.66); color: #fff; font-size: 11px;
@@ -190,12 +200,13 @@
     padding: 10px; border: 1px dashed var(--border); border-radius: 10px;
     font-size: 12px; color: var(--muted);
   }
+  .card-note button { padding: 0; border: none; font-size: 12px; }
   .card-off { margin-top: 6px; font-size: 12px; color: var(--muted); }
   .card-off button { padding: 0; border: none; font-size: 12px; }
 
   /* A quoted post reuses the card frame but reads like a post. */
-  .card.quote { padding: 10px; padding-right: 38px; }
-  .quote-head { display: flex; align-items: center; gap: 8px; }
+  .card.quote { padding: 10px; }
+  .quote-head { display: flex; align-items: center; gap: 8px; padding-right: 68px; }
   .quote-head img {
     flex: none; width: 32px; height: 32px; border-radius: 50%;
     object-fit: cover; background: var(--border);
@@ -586,11 +597,13 @@ async function quoteEmbed(url) {
   };
 }
 
-// The embed for a post: its first URL, quoted when it points at a Bluesky post.
-async function embedFor(text, auth) {
+// The embed for a post: its first URL, else a pinned preview. A bsky.app post becomes a quote.
+async function embedFor(text, i, auth) {
   const url = firstUrl(text);
-  if (!url || previewsOff.has(url)) return null;
-  return bskyPost(url) ? quoteEmbed(url) : externalCard(url, auth);
+  if (url && previewsOff.has(url)) return null;
+  const source = url || pins[i]?.url || null;
+  if (!source) return null;
+  return bskyPost(source) ? quoteEmbed(source) : externalCard(source, auth);
 }
 
 // Spans of text that Bluesky renders as links, tags or mentions, as UTF-16 indices into the
@@ -1133,7 +1146,7 @@ async function postThread() {
         }
         record.embed = { $type: 'app.bsky.embed.images', images };
       } else {
-        const embed = await embedFor(text, auth);
+        const embed = await embedFor(text, i, auth);
         if (embed) record.embed = embed;
       }
       const { uri, cid } = await auth.xrpc('com.atproto.repo.createRecord',
@@ -1176,6 +1189,9 @@ let currentPosts = [];
 let statusEls = [];
 // Images attached to each post number: media[i] = [{ blob, url, alt, width, height }]
 const media = [];
+// Pinned previews by post number: pins[i] = { url }. Lets the URL text be deleted without
+// losing the embed. Like media, a pin follows the post slot, and the preview shows where it sits.
+const pins = [];
 
 const liveThread = () => (thread && thread.key === currentPosts.join('\0') ? thread : null);
 
@@ -1191,6 +1207,7 @@ function resetComposer() {
   currentPosts = [];
   thread = null;
   clearMedia();
+  pins.length = 0;
   closeSuggest();
 }
 
@@ -1345,16 +1362,60 @@ function richText(el, text, dids) {
   if (at < text.length) el.append(text.slice(at));
 }
 
-// The remove control shared by every preview.
-function previewControls(card, url) {
+// Pin and remove controls shared by every preview.
+function previewControls(card, i, url, pinned) {
+  const pin = document.createElement('button');
+  pin.type = 'button';
+  pin.className = 'pin';
+  pin.classList.toggle('on', pinned);
+  pin.title = pinned ? 'Unpin preview' : 'Pin preview';
+  pin.setAttribute('aria-label', pin.title);
+  pin.setAttribute('aria-pressed', String(pinned));
+  pin.innerHTML = '<svg viewBox="0 0 24 24"><path d="M9 4h6"/><path d="M10 4l-1 7-3 3h12l-3-3-1-7"/><path d="M12 14v6"/></svg>';
+  pin.onclick = () => {
+    if (pinned) pins[i] = null;
+    else pins[i] = { url };
+    render();
+  };
+
   const drop = document.createElement('button');
   drop.type = 'button';
   drop.className = 'drop';
   drop.title = 'Remove preview';
   drop.setAttribute('aria-label', 'Remove preview');
   drop.textContent = '×';
-  drop.onclick = () => { previewsOff.add(url); render(); };
-  card.append(drop);
+  drop.onclick = () => { pins[i] = null; previewsOff.add(url); render(); };
+  card.append(pin, drop);
+
+  if (pinned) {
+    const badge = document.createElement('span');
+    badge.className = 'pinned-badge';
+    badge.textContent = 'Pinned';
+    const target = card.querySelector('.card-body') || card.querySelector('.quote-text');
+    if (target) target.before(badge);
+    else card.append(badge);
+  }
+}
+
+// Unpin from the loading/failed state, where there is no card to hang a pin control on.
+function addUnpin(el, i) {
+  const unpin = document.createElement('button');
+  unpin.type = 'button';
+  unpin.textContent = 'Unpin';
+  unpin.onclick = () => { pins[i] = null; render(); };
+  el.append(' ', unpin);
+}
+
+// Drop the cached failure and ask again.
+function addRetry(el, url, isQuote) {
+  const retry = document.createElement('button');
+  retry.type = 'button';
+  retry.textContent = 'Retry';
+  retry.onclick = () => {
+    (isQuote ? quotes : cards).delete(url);
+    render();
+  };
+  el.append(' ', retry);
 }
 
 // An external link card.
@@ -1458,28 +1519,32 @@ function quoteNode(entry) {
 }
 
 // Paint the preview, or explain why there isn't one, for a post that has no images.
-function renderPreview(slot, text) {
+function renderPreview(slot, i, text) {
   slot.replaceChildren();
   const url = firstUrl(text);
-  if (!url) return;
-  if (previewsOff.has(url)) {
+  const pinnedUrl = pins[i]?.url || null;
+  const shown = url || pinnedUrl;
+  if (!shown) return;
+  const pinned = pinnedUrl === shown;
+  if (previewsOff.has(shown)) {
     const row = document.createElement('div');
     row.className = 'card-off';
     row.append('Preview off. ');
     const show = document.createElement('button');
     show.type = 'button';
     show.textContent = 'Show preview';
-    show.onclick = () => { previewsOff.delete(url); render(); };
+    show.onclick = () => { previewsOff.delete(shown); render(); };
     row.append(show);
     slot.append(row);
     return;
   }
-  const quote = !!bskyPost(url);
-  const entry = quote ? loadQuote(url) : loadCard(url);
+  const quote = !!bskyPost(shown);
+  const entry = quote ? loadQuote(shown) : loadCard(shown);
   if (!entry || entry.state === 'loading') {
     const note = document.createElement('div');
     note.className = 'card-note';
-    note.textContent = quote ? 'Loading quoted post…' : `Checking link… ${hostOf(url)}`;
+    note.textContent = quote ? 'Loading quoted post…' : `Checking link… ${hostOf(shown)}`;
+    if (pinned) addUnpin(note, i);
     slot.append(note);
     return;
   }
@@ -1487,11 +1552,13 @@ function renderPreview(slot, text) {
     const note = document.createElement('div');
     note.className = 'card-note';
     note.textContent = quote ? 'quoted post unavailable' : 'no preview available';
+    addRetry(note, shown, quote);
+    if (pinned) addUnpin(note, i);
     slot.append(note);
     return;
   }
   const card = quote ? quoteNode(entry) : cardNode(entry);
-  previewControls(card, url);
+  previewControls(card, i, shown, pinned);
   slot.append(card);
 }
 
@@ -1588,7 +1655,7 @@ function render() {
     });
 
     // A preview is only possible when the post has no images: images win in the record.
-    if (!imgs.length) renderPreview(card.querySelector('.card-slot'), p);
+    if (!imgs.length) renderPreview(card.querySelector('.card-slot'), i, p);
 
     postsEl.append(card);
   });

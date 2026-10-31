@@ -3,14 +3,78 @@
 A single web page that splits a chunk of text into Bluesky posts and posts them as a thread. It can be
 installed as an app, and it signs in with Bluesky's OAuth (or an app password, if you prefer).
 
-- **Smart splitting.** Posts break at sentence boundaries where possible, with lengths kept roughly even. Word breaks are a fallback, used only when sentence breaks would leave a post very short or over the 300-character limit. Paragraph breaks are preferred but not forced.
-- **Images.** Add up to 4 images per post, with alt text. Large images are resized to fit Bluesky's 1 MB limit.
-- **Links, hashtags and mentions.** All three are made clickable. Typing `@` searches accounts as you type and stores the pick with its DID; hand-typed handles are resolved the same way. A handle that doesn't resolve stays plain text instead of failing the post.
-- **Link previews in the composer.** The first link in a post without images shows a card as you type — the same card that gets posted, fetched once through `cardyb`. Use × to drop it, so a bad preview never gets embedded. A card with no image says `cardyb returned no image`; a URL with no preview says so instead of leaving a blank.
-- **Quote posts.** A Bluesky post URL becomes a real quote (a record embed), previewed with the author, text and first image while you type. A post that cannot be fetched falls back to plain text instead of blocking the thread.
-- **Pinned embeds.** Pin a card or quote to keep it attached after deleting the URL from the post text. Unpin returns it to following the URL.
-- **One-click threads.** If posting fails partway, the button resumes from where it stopped instead of starting over.
-- **New thread or continue.** After a thread publishes, start clean or reply to its last post and grow the same thread. Earlier posts stay visible, marked as posted, while the new ones are drafted. A failed thread only offers Resume.
+## Features
+
+### Installable app with Bluesky sign-in
+
+![The Splitter header with the Bluesky sign-in button](docs/screenshots/sign-in.png)
+
+Install it from `http://127.0.0.1:8000/` (or a hosted deployment) and sign in with atproto OAuth; app
+passwords remain the fallback for a file opened from disk.
+
+### Smart splitting
+
+![The composer splitting a draft into two posts](docs/screenshots/splitting.png)
+
+Posts break at sentence boundaries where possible, with lengths kept roughly even. Word breaks are a
+fallback, used only when sentence breaks would leave a post very short or over the 300-character
+limit. Paragraph breaks are preferred but not forced.
+
+### Images with alt text
+
+![A post with an attached image and its alt text field](docs/screenshots/images.png)
+
+Add up to four images to any post, each with its own alt text. Large images are resized to fit
+Bluesky's 1 MB limit.
+
+### Links, hashtags and mentions
+
+![Mention completion and highlighted links, hashtags and mentions](docs/screenshots/mentions.png)
+
+All three become facets that Bluesky renders as links. Typing `@` searches accounts as you type and
+stores the pick with its DID; hand-typed handles resolve the same way. A handle that doesn't resolve
+stays plain text instead of failing the post.
+
+### Link previews
+
+![A link card preview under a post](docs/screenshots/link-card.png)
+
+The first link in a post without images shows a card as you type — the same card that gets posted,
+fetched once through `cardyb`. Use × to drop it, so a bad preview never gets embedded. A card with no
+image says `cardyb returned no image`; a URL with no preview says so instead of leaving a blank.
+
+### Quote posts
+
+![A quoted Bluesky post previewed in the composer](docs/screenshots/quote-post.png)
+
+A Bluesky post URL becomes a real quote (a record embed), previewed with the author, text and first
+image while you type. A post that cannot be fetched falls back to plain text instead of blocking the
+thread.
+
+### Pinned embeds
+
+![A pinned link card after its URL was removed from the text](docs/screenshots/pinned.png)
+
+Pin a card or quote to keep it attached after deleting the URL from the post text. Unpin returns it
+to following the URL, and a pinned preview whose lookup failed can be retried or unpinned.
+
+### Resume a failed thread
+
+![A partly posted thread with the Resume button](docs/screenshots/resume-thread.png)
+
+If posting fails partway, the button resumes from where it stopped instead of starting over. Posts
+already on Bluesky stay marked as posted, so nothing is sent twice.
+
+### New thread or continue
+
+![A completed thread with View thread, New thread and Continue thread](docs/screenshots/thread-actions.png)
+
+After a thread publishes, start clean or reply to its last post and grow the same thread.
+
+![Continuing a thread with earlier posts marked as posted and two new posts drafted](docs/screenshots/continue-thread.png)
+
+Earlier posts stay visible, marked as posted, while the new ones are drafted. A failed thread only
+offers Resume.
 
 ## Use
 
@@ -88,6 +152,7 @@ seam for that but no hosted client yet.
 | `manifest.webmanifest` | name, icons, install behaviour |
 | `sw.js` | service worker caching the app shell |
 | `icons/` | SVG sources and generated PNGs |
+| `docs/screenshots/` | images used in this README |
 
 ## Development
 

@@ -153,6 +153,34 @@
     position: absolute; top: 4px; right: 4px; padding: 0 7px;
     background: rgba(0, 0, 0, 0.6); color: #fff; border: none;
   }
+
+  /* Handle completion, anchored under the caret. */
+  .suggest {
+    position: absolute; z-index: 10; width: min(360px, calc(100vw - 16px));
+    max-height: 280px; overflow-y: auto; padding: 4px;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow);
+  }
+  .sug {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 6px 8px; text-align: left; border: none; border-radius: 8px;
+    background: transparent; color: var(--text); font: inherit;
+  }
+  .sug[aria-selected="true"], .sug:hover { background: var(--accent-soft); }
+  .sug img {
+    flex: none; width: 32px; height: 32px; border-radius: 50%;
+    object-fit: cover; background: var(--border);
+  }
+  .sug .names { display: flex; flex-direction: column; min-width: 0; }
+  .sug .name {
+    font-size: 14px; font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sug .handle {
+    font-size: 12px; color: var(--muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sug .none { padding: 8px; font-size: 13px; color: var(--muted); }
+  .post-text .mention { color: var(--accent); }
 </style>
 </head>
 <body>
@@ -203,6 +231,7 @@
     </div>
   </div>
 </main>
+<div id="suggest" class="suggest" role="listbox" aria-label="Accounts" hidden></div>
 
 <script>
 // ---- Splitting ----
@@ -324,6 +353,10 @@ async function getJson(url) {
 
 const URL_RE = /https?:\/\/[^\s]+/g;
 const trimUrl = u => u.replace(/[.,;:!?)\]]+$/, '');
+const TAG_RE = /(^|\s)#([^\s#.,;:!?()]+)/g;
+// An @handle, but not the @ in an email address or inside a URL. Requiring a dot plus a TLD
+// keeps ordinary prose out; handles that don't resolve simply stay plain text.
+const MENTION_RE = /(^|[^\w@/])@([a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,})/gi;
 
 // Images over this size or dimension are re-encoded as JPEG (Bluesky's cap is 1,000,000 bytes).
 const MAX_IMAGES = 4, MAX_BYTES = 950000, MAX_DIM = 2000;
@@ -369,27 +402,86 @@ async function linkCard(text, auth) {
   }
 }
 
-// Bluesky doesn't auto-link; mark URLs and #tags by UTF-8 byte range.
-function facets(text) {
-  const enc = new TextEncoder();
-  const byte = i => enc.encode(text.slice(0, i)).length;
-  const out = [];
+// Spans of text that Bluesky renders as links, tags or mentions, as UTF-16 indices into the
+// post; facets() turns those into the UTF-8 byte ranges the record format wants.
+function segments(text, dids) {
+  const spans = [];
   for (const m of text.matchAll(URL_RE)) {
     const uri = trimUrl(m[0]);
-    out.push({
-      index: { byteStart: byte(m.index), byteEnd: byte(m.index + uri.length) },
-      features: [{ $type: 'app.bsky.richtext.facet#link', uri }],
-    });
+    spans.push({ start: m.index, end: m.index + uri.length, kind: 'link', uri });
   }
-  for (const m of text.matchAll(/(^|\s)#([^\s#.,;:!?()]+)/g)) {
+  for (const m of text.matchAll(TAG_RE)) {
     if (/^\d+$/.test(m[2])) continue;
     const start = m.index + m[1].length;
-    out.push({
-      index: { byteStart: byte(start), byteEnd: byte(start + 1 + m[2].length) },
-      features: [{ $type: 'app.bsky.richtext.facet#tag', tag: m[2] }],
-    });
+    spans.push({ start, end: start + 1 + m[2].length, kind: 'tag', tag: m[2] });
   }
-  return out;
+  for (const m of text.matchAll(MENTION_RE)) {
+    const did = dids?.get(m[2].toLowerCase());
+    if (!did) continue;
+    const start = m.index + m[1].length;
+    spans.push({ start, end: start + 1 + m[2].length, kind: 'mention', did, handle: m[2] });
+  }
+  spans.sort((a, b) => a.start - b.start);
+  // A URL can contain a # or an @-looking path segment, so the first span wins.
+  const kept = [];
+  for (const s of spans) {
+    if (kept.length && s.start < kept[kept.length - 1].end) continue;
+    kept.push(s);
+  }
+  return kept;
+}
+
+// Bluesky doesn't auto-link; mark URLs, #tags and resolved @mentions by UTF-8 byte range.
+function facets(text, dids) {
+  const enc = new TextEncoder();
+  const byte = i => enc.encode(text.slice(0, i)).length;
+  return segments(text, dids).map(s => {
+    const index = { byteStart: byte(s.start), byteEnd: byte(s.end) };
+    if (s.kind === 'link') {
+      return { index, features: [{ $type: 'app.bsky.richtext.facet#link', uri: s.uri }] };
+    }
+    if (s.kind === 'tag') {
+      return { index, features: [{ $type: 'app.bsky.richtext.facet#tag', tag: s.tag }] };
+    }
+    return { index, features: [{ $type: 'app.bsky.richtext.facet#mention', did: s.did }] };
+  });
+}
+
+// ---- Mentions ----
+// Handles resolve to DIDs once per session; failures are cached too, so a typo doesn't mean a
+// lookup per keystroke. Search is a community typeahead: https://typeahead.waow.tech/docs
+const TYPEAHEAD = 'https://typeahead.waow.tech/xrpc/tech.waow.typeahead.searchActors';
+const mentionDids = new Map();     // handle (lowercase) -> did | null
+const mentionLookups = new Map();  // handle -> in-flight Promise
+
+function lookupHandle(handle) {
+  const key = handle.toLowerCase();
+  if (mentionDids.has(key)) return Promise.resolve(mentionDids.get(key));
+  if (!mentionLookups.has(key)) {
+    mentionLookups.set(key, getJson(
+      `${PUBLIC_API}/xrpc/com.atproto.identity.resolveHandle?handle=${encodeURIComponent(key)}`,
+    )
+      .then(d => d.did || null, () => null)
+      .then(did => { mentionDids.set(key, did); mentionLookups.delete(key); return did; }));
+  }
+  return mentionLookups.get(key);
+}
+
+const handlesIn = text => [...text.matchAll(MENTION_RE)].map(m => m[2].toLowerCase());
+
+// Resolve every handle in a post before writing its facets. Unresolvable ones stay as text.
+async function resolveMentions(text, self) {
+  const resolved = new Map();
+  await Promise.all([...new Set(handlesIn(text))].map(async handle => {
+    if (self?.handle && handle === self.handle.toLowerCase()) {
+      mentionDids.set(handle, self.did);
+      resolved.set(handle, self.did);
+      return;
+    }
+    const did = await lookupHandle(handle);
+    if (did) resolved.set(handle, did);
+  }));
+  return resolved;
 }
 
 // A session's scope says how it signed in: 'com.atproto.access' means the account password,
@@ -823,7 +915,8 @@ async function postThread() {
       threadMsg.textContent = `Posting ${i + 1} of ${n}…`;
       const text = thread.posts[i];
       const record = { $type: 'app.bsky.feed.post', text, createdAt: new Date().toISOString() };
-      const f = facets(text);
+      const dids = await resolveMentions(text, auth);
+      const f = facets(text, dids);
       if (f.length) record.facets = f;
       if (i > 0) record.reply = { root: thread.refs[0], parent: thread.refs[i - 1] };
       const imgs = media[i] || [];
@@ -965,6 +1058,45 @@ function renderAuth() {
 
 let renderTimer = null;
 
+function scheduleRender(delay = 150) {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(render, delay);
+}
+
+// Paint the preview with the same spans that will become facets: links and tags always,
+// mentions once their DID has resolved.
+function richText(el, text, dids) {
+  el.replaceChildren();
+  let at = 0;
+  for (const s of segments(text, dids)) {
+    if (s.start > at) el.append(text.slice(at, s.start));
+    if (s.kind === 'mention') {
+      const span = document.createElement('span');
+      span.className = 'mention';
+      span.textContent = text.slice(s.start, s.end);
+      span.title = `@${s.handle}`;
+      el.append(span);
+    } else {
+      const a = document.createElement('a');
+      a.href = s.kind === 'link' ? s.uri : `https://bsky.app/hashtag/${encodeURIComponent(s.tag)}`;
+      a.target = '_blank';
+      a.rel = 'noreferrer';
+      a.textContent = text.slice(s.start, s.end);
+      el.append(a);
+    }
+    at = s.end;
+  }
+  if (at < text.length) el.append(text.slice(at));
+}
+
+// Look up hand-typed mentions so the preview can highlight them too.
+function primeMentions(posts) {
+  for (const handle of new Set(posts.flatMap(handlesIn))) {
+    if (mentionDids.has(handle) || mentionLookups.has(handle)) continue;
+    lookupHandle(handle).then(() => scheduleRender(60));
+  }
+}
+
 const EMPTY = '<div class="empty">Paste text on the left to see it split into a thread here. ' +
   'Drag images onto any post to attach them.</div>';
 const svg = d => `<svg viewBox="0 0 24 24">${d}</svg>`;
@@ -995,7 +1127,7 @@ function render() {
         ${len} / ${LIMIT}</span>
       <span class="actions"><span></span><button class="icon add" title="Add image" aria-label="Add image">${ICON.image}</button></span></div></div>
       <input type="file" accept="image/*" multiple hidden>`;
-    card.querySelector('.post-text').textContent = p;
+    richText(card.querySelector('.post-text'), p, mentionDids);
     statusEls.push(card.querySelector('.actions span'));
 
     const fileIn = card.querySelector('input[type=file]');
@@ -1023,6 +1155,7 @@ function render() {
 
     postsEl.append(card);
   });
+  primeMentions(posts);
   updateThreadUI();
 }
 
@@ -1053,10 +1186,189 @@ for (const type of ['dragover', 'drop']) {
   window.addEventListener(type, e => { if (e.dataTransfer.types.includes('Files')) e.preventDefault(); });
 }
 
+// ---- Handle completion ----
+const suggestEl = document.getElementById('suggest');
+const searchCache = new Map();  // query -> { at, actors }
+let suggest = null;             // { start, end, query, items, index }
+let searchTimer = null;
+
+async function searchActors(query) {
+  const hit = searchCache.get(query);
+  if (hit && Date.now() - hit.at < 60000) return hit.actors;
+  const res = await fetch(`${TYPEAHEAD}?q=${encodeURIComponent(query)}&limit=8`, {
+    headers: { 'X-Client': 'github.com/bmann/Splitter' },
+  });
+  if (!res.ok) throw new Error(`typeahead ${res.status}`);
+  const { actors = [] } = await res.json();
+  const list = actors.map(a => ({
+    did: a.did,
+    handle: a.handle,
+    name: a.displayName || a.handle,
+    avatar: a.avatar || '',
+  }));
+  searchCache.set(query, { at: Date.now(), actors: list });
+  return list;
+}
+
+// The @word the caret sits at the end of, if any.
+function mentionBefore() {
+  const before = input.value.slice(0, input.selectionStart);
+  const m = before.match(/(?:^|[\s([{"'])@([a-z0-9.-]{1,64})$/i);
+  if (!m) return null;
+  const end = input.selectionStart;
+  return { query: m[1], start: end - m[1].length - 1, end };
+}
+
+function closeSuggest() {
+  clearTimeout(searchTimer);
+  suggestEl.hidden = true;
+  suggestEl.replaceChildren();
+  suggest = null;
+}
+
+function selectRow(index) {
+  suggest.index = index;
+  [...suggestEl.children].forEach((el, i) => {
+    if (el.classList.contains('sug')) el.setAttribute('aria-selected', String(i === index));
+  });
+}
+
+function showSuggest(items) {
+  suggestEl.replaceChildren();
+  if (!items.length) {
+    const none = document.createElement('div');
+    none.className = 'none';
+    none.textContent = 'No accounts found.';
+    suggestEl.append(none);
+    return;
+  }
+  items.forEach((actor, i) => {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'sug';
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', String(i === suggest.index));
+    const img = document.createElement('img');
+    img.alt = '';
+    img.loading = 'lazy';
+    img.referrerPolicy = 'no-referrer';  // avatars come from CDNs with hotlink rules
+    if (actor.avatar) img.src = actor.avatar;
+    const names = document.createElement('span');
+    names.className = 'names';
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = actor.name;
+    const handle = document.createElement('span');
+    handle.className = 'handle';
+    handle.textContent = `@${actor.handle}`;
+    names.append(name, handle);
+    row.append(img, names);
+    row.onmouseenter = () => selectRow(i);
+    row.onmousedown = e => e.preventDefault();  // keep the caret in the textarea
+    row.onclick = () => chooseActor(actor);
+    suggestEl.append(row);
+  });
+}
+
+// Anchor the list just under the caret by mirroring the textarea's text and layout.
+function placeSuggest() {
+  const cs = getComputedStyle(input);
+  const mirror = document.createElement('div');
+  mirror.setAttribute('aria-hidden', 'true');
+  Object.assign(mirror.style, {
+    position: 'absolute', visibility: 'hidden', whiteSpace: 'pre-wrap', wordWrap: 'break-word',
+    boxSizing: 'content-box', top: '-9999px', left: '-9999px',
+    width: `${input.clientWidth}px`, fontFamily: cs.fontFamily, fontSize: cs.fontSize,
+    fontWeight: cs.fontWeight, lineHeight: cs.lineHeight, letterSpacing: cs.letterSpacing,
+    padding: cs.padding, border: '0',
+  });
+  mirror.textContent = input.value.slice(0, input.selectionStart);
+  const marker = document.createElement('span');
+  marker.textContent = '\u200b';
+  mirror.append(marker);
+  document.body.append(mirror);
+  const rect = input.getBoundingClientRect();
+  const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5;
+  const caretTop = marker.offsetTop;
+  const caretLeft = marker.offsetLeft;
+  mirror.remove();
+
+  let top = rect.top + caretTop + lineHeight - input.scrollTop + 4;
+  let left = rect.left + caretLeft - input.scrollLeft;
+
+  const width = suggestEl.offsetWidth;
+  left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+  if (top + suggestEl.offsetHeight > window.innerHeight - 8) {
+    top = Math.max(8, rect.top + caretTop - input.scrollTop - suggestEl.offsetHeight - 4);
+  }
+  suggestEl.style.left = `${left + window.scrollX}px`;
+  suggestEl.style.top = `${top + window.scrollY}px`;
+}
+
+function updateSuggest() {
+  const anchor = mentionBefore();
+  if (!anchor) return closeSuggest();
+  suggest = { ...anchor, items: [], index: 0 };
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(async () => {
+    const query = suggest?.query;
+    if (!query) return;
+    try {
+      const actors = await searchActors(query);
+      if (!suggest || suggest.query !== query) return;  // typing moved on
+      suggest.items = actors;
+      suggest.index = 0;
+      suggestEl.hidden = false;
+      showSuggest(actors);
+      placeSuggest();
+    } catch {
+      closeSuggest();  // search is optional; never get in the way of typing
+    }
+  }, 180);
+}
+
+function chooseActor(actor) {
+  const { start, end } = suggest;
+  const value = input.value;
+  const insert = `@${actor.handle} `;
+  input.value = value.slice(0, start) + insert + value.slice(end);
+  const caret = start + insert.length;
+  input.setSelectionRange(caret, caret);
+  mentionDids.set(actor.handle.toLowerCase(), actor.did);
+  closeSuggest();
+  input.focus();
+  scheduleRender(0);
+}
+
 input.addEventListener('input', () => {
-  clearTimeout(renderTimer);
-  renderTimer = setTimeout(render, 150);
+  scheduleRender();
+  updateSuggest();
 });
+input.addEventListener('click', updateSuggest);
+input.addEventListener('blur', () => setTimeout(closeSuggest, 120));
+input.addEventListener('keydown', e => {
+  if (!suggest || suggestEl.hidden) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!suggest.items.length) return;
+    e.preventDefault();
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    selectRow((suggest.index + step + suggest.items.length) % suggest.items.length);
+  } else if ((e.key === 'Enter' || e.key === 'Tab') && suggest.items.length) {
+    e.preventDefault();
+    chooseActor(suggest.items[suggest.index]);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeSuggest();
+  }
+});
+input.addEventListener('keyup', e => {
+  if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) updateSuggest();
+});
+document.addEventListener('mousedown', e => {
+  if (suggest && e.target !== input && !suggestEl.contains(e.target)) closeSuggest();
+});
+addEventListener('scroll', () => suggest && placeSuggest(), true);
+addEventListener('resize', () => suggest && placeSuggest());
 postBtn.addEventListener('click', postThread);
 
 // ---- PWA ----

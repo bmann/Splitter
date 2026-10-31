@@ -1,13 +1,13 @@
 {
   "id": "./",
-  "name": "Bluesky Splitter",
+  "name": "Atmosphere Splitter",
   "short_name": "Splitter",
-  "description": "Split long text into a Bluesky thread and post it in one go, with images and link previews.",
+  "description": "Split long text into a thread and post it in one go, with images, link cards, quotes and pinned embeds.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#f1f3f5",
-  "theme_color": "#1083fe",
+  "background_color": "#f4f8ff",
+  "theme_color": "#2f8fee",
   "lang": "en",
   "categories": ["social", "productivity", "utilities"],
   "icons": [

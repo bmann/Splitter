@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Splitter theme",
+  "type": "object",
+  "required": ["slug", "name", "light", "dark"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]{1,40}$",
+      "description": "Unique id. Lowercase letters, digits and hyphens."
+    },
+    "name": { "type": "string", "minLength": 1 },
+    "signIn": {
+      "type": "string",
+      "description": "Service name used on the sign-in button, e.g. \"Bluesky\" for \"Sign in with Bluesky\". Defaults to Atmosphere."
+    },
+    "description": { "type": "string" },
+    "author": { "type": "string" },
+    "homepage": { "type": "string", "format": "uri" },
+    "css": {
+      "type": "string",
+      "description": "Optional extra stylesheet, relative to this file. Trusted CSS; review before installing."
+    },
+    "light": { "$ref": "#/$defs/tokens" },
+    "dark": { "$ref": "#/$defs/tokens" }
+  },
+  "$defs": {
+    "tokens": {
+      "type": "object",
+      "properties": {
+        "--bg": { "type": "string" },
+        "--panel": { "type": "string" },
+        "--text": { "type": "string" },
+        "--muted": { "type": "string" },
+        "--border": { "type": "string" },
+        "--accent": { "type": "string" },
+        "--accent-soft": { "type": "string" },
+        "--on-accent": { "type": "string" },
+        "--warn": { "type": "string" },
+        "--shadow": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

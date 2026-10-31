@@ -1,10 +1,10 @@
-# Splitter
+# Atmosphere Splitter
 
-Splits pasted text into Bluesky posts and posts them as a thread. See `README.md`.
+Splits pasted text into a thread and posts it to Bluesky. See `README.md`.
 
 ## Working conventions
-- Keep the app one page: `index.html` holds all markup, styles and script, with no build step and no libraries. If one is ever needed, load it from a pinned CDN version. The PWA companion files (`manifest.webmanifest`, `sw.js`, `icons/`) are the only other moving parts.
-- The page must keep working when opened from disk as a bare file; anything that needs an origin (sign-in, installation) degrades to the app-password path with an explanation.
+- Keep the app one page: `index.html` holds all markup, styles and script, with no build step and no libraries. If one is ever needed, load it from a pinned CDN version. The PWA companion files (`manifest.webmanifest`, `sw.js`, `icons/`) and community `themes/` are the only other moving parts.
+- The page must keep working when opened from disk as a bare file; anything that needs an origin (sign-in, installation, community themes) degrades to the app-password/built-in path with an explanation.
 - OAuth is implemented directly against the atproto spec in `index.html`; don't add a client library. Keep the `clientIdFor()` seam — a hosted deployment needs its own branch there.
 - Never cache cross-origin requests in `sw.js`, and never put tokens in local storage.
 - Mentions resolve to DIDs before `createRecord`; a failed lookup must always fall back to plain text. Typeahead queries are debounced and cached, and the service is a third party (`typeahead.waow.tech`), so keep the `X-Client` header set.
@@ -12,10 +12,11 @@ Splits pasted text into Bluesky posts and posts them as a thread. See `README.md
 - A `bsky.app/profile/…/post/…` URL is a quote, not an external card: resolve it to `{ uri, cid }` through `public.api.bsky.app` (`getPosts`) and post `app.bsky.embed.record`. Cache by URL and reuse the resolved CID at post time; quoting is still an `app.bsky.feed.post` create, so `app.bsky.authCreatePosts` already covers it.
 - Pinned previews live in `pins[i]` by post slot, like `media[i]`, and the preview shows which slot holds one. `embedFor(text, i, auth)` uses the URL in the text first, then the pin; images still win. Clear pins in `resetComposer`, and keep an Unpin path for a pinned preview whose fetch failed.
 - A continuation keeps `root` (the original first ref) and `parent` (the last published ref) on the thread; `refs[0]` is only the root of a first segment. A failed segment must keep its continuation state so Resume replies from the same parent.
+- Themes are token blocks: built-ins in `index.html` (so `file://` works and the first paint is correct), community themes in `themes/<slug>/theme.json` listed by `themes/index.json`. The picker persists `splitter-theme`; a tiny head script applies it before paint and caches community token CSS under `splitter-theme-css`. Keep `themes/index.json` and theme files network-first in `sw.js`, and do not require an `index.html` edit to add a community theme.
 - Discuss and get approval before changing direction or architecture; small fixes the user asked for can go straight ahead.
 - The repo is public: never put app passwords, tokens or personal content in committed files. Credentials live only in the user's browser.
 - After changing the script, at least run a syntax check (`node --check` on the extracted `<script>`), and check the page in a browser at `http://127.0.0.1:8000/` (console errors, service worker, install prompt). Posting and the OAuth consent click can only be tested by the user.
-- Bump `VERSION` in `sw.js` whenever the shell changes.
+- Bump `VERSION` in `sw.js` whenever the shell, a built-in palette, or the theme loader changes.
 
 ## How to report back
 

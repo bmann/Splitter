@@ -1,11 +1,12 @@
 // Caches the app shell so Splitter opens offline.
 // Cross-origin requests are never intercepted: posting, identity resolution and link
 // previews must always hit the network, and a cached POST would be a lie.
-const VERSION = 'splitter-v7';
+const VERSION = 'splitter-v9';
 const SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
+  './themes/index.json',
   './icons/icon.svg',
   './icons/icon-192.png',
   './icons/icon-512.png',
@@ -46,6 +47,22 @@ self.addEventListener('fetch', event => {
           return res;
         })
         .catch(() => caches.match('./index.html'))
+    );
+    return;
+  }
+
+  // Theme metadata changes when someone adds a theme, so keep it fresh; fall back to the cache.
+  if (new URL(request.url).pathname.includes('/themes/')) {
+    event.respondWith(
+      fetch(new Request(request, { cache: 'no-store' }))
+        .then(res => {
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(VERSION).then(cache => cache.put(request, copy)).catch(() => {});
+          }
+          return res;
+        })
+        .catch(() => caches.match(request))
     );
     return;
   }

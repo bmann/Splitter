@@ -1,13 +1,13 @@
-# Splitter
+# Atmosphere Splitter
 
-A single web page that splits a chunk of text into Bluesky posts and posts them as a thread. It can be
-installed as an app, and it signs in with Bluesky's OAuth (or an app password, if you prefer).
+A single web page that splits a chunk of text into a thread and posts it in one go. It can be
+installed as an app, and it signs in with atproto OAuth (or an app password, if you prefer).
 
 ## Features
 
-### Installable app with Bluesky sign-in
+### Installable app with atproto sign-in
 
-![The Splitter header with the Bluesky sign-in button](docs/screenshots/sign-in.png)
+![The Atmosphere Splitter header with the sign-in button](docs/screenshots/sign-in.png)
 
 Install it from `http://127.0.0.1:8000/` (or a hosted deployment) and sign in with atproto OAuth; app
 passwords remain the fallback for a file opened from disk.
@@ -29,7 +29,7 @@ Bluesky's 1 MB limit.
 
 ### Links, hashtags and mentions
 
-![Mention completion and highlighted links, hashtags and mentions](docs/screenshots/mentions.png)
+![Highlighted mentions, links and hashtags beside a link card](docs/screenshots/mentions.png)
 
 All three become facets that Bluesky renders as links. Typing `@` searches accounts as you type and
 stores the pick with its DID; hand-typed handles resolve the same way. A handle that doesn't resolve
@@ -76,6 +76,30 @@ After a thread publishes, start clean or reply to its last post and grow the sam
 Earlier posts stay visible, marked as posted, while the new ones are drafted. A failed thread only
 offers Resume.
 
+## Themes
+
+Atmosphere is the default: a light blue palette that doesn't make Bluesky the product's identity.
+Pick another in the header; the choice is remembered and follows the system light/dark setting.
+
+| Theme | Palette |
+| --- | --- |
+| Atmosphere | light blue, the neutral default |
+| Bluesky | Bluesky blue |
+| Blacksky | Blacksky black and indigo |
+| Mu.Social | Mu.Social pink |
+
+The four built-ins live in `index.html` so they work from `file://`. Community themes live in
+`themes/`: add a folder and a line in `themes/index.json`, reload, and it appears in the picker. See
+[`themes/README.md`](themes/README.md) for the format, the JSON schema and a complete example.
+
+The sign-in button follows the theme: **Sign in with Atmosphere** by default, then **Sign in with
+Bluesky**, **Sign in with Blacksky**, or **Sign in with Mu**. Community themes can set their own
+`signIn` label.
+
+Community themes need the local server because browsers cannot fetch their JSON from `file://`.
+The theme choice is stored locally, and the last community token block is cached so it applies before
+paint on the next visit.
+
 ## Use
 
 There are two ways to open it, and they differ in what sign-in they allow.
@@ -101,7 +125,8 @@ use an app password.
 
 ## Signing in
 
-**Sign in with Bluesky** uses atproto OAuth. The browser goes to Bluesky, you approve, and you come
+The sign-in button — **Sign in with Atmosphere** by default, or the active theme's label — uses
+atproto OAuth. The browser goes to the account's authorization service, you approve, and you come
 back signed in. It asks for one narrow permission — create posts, including uploading images — so it
 cannot read your timeline, change your profile, or delete posts.
 
@@ -152,6 +177,7 @@ seam for that but no hosted client yet.
 | `manifest.webmanifest` | name, icons, install behaviour |
 | `sw.js` | service worker caching the app shell |
 | `icons/` | SVG sources and generated PNGs |
+| `themes/` | theme format, schema, example and community themes |
 | `docs/screenshots/` | images used in this README |
 
 ## Development
@@ -160,5 +186,5 @@ No build step, no dependencies, no bundler. Edit `index.html` and reload. Two th
 
 - Icons are generated from the SVGs: `rsvg-convert -w 512 -h 512 icons/icon.svg -o icons/icon-512.png`
   (and likewise for 192; `icon-maskable.svg` is the source for the maskable and Apple touch icons).
-- When `index.html` or the icon set changes, bump `VERSION` in `sw.js`, or installed copies will keep
-  the old shell until the cache expires.
+- When `index.html`, the icon set, or a built-in palette changes, bump `VERSION` in `sw.js`, or
+  installed copies will keep the old shell until the cache expires.

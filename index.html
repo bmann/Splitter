@@ -1,14 +1,13 @@
-<!-- Splits pasted text into Bluesky posts and posts them as a thread -->
+<!-- Splits pasted text into a thread and posts it to Bluesky -->
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bluesky Splitter</title>
-<meta name="description" content="Split long text into a Bluesky thread and post it in one go, with images and link previews.">
+<title>Atmosphere Splitter</title>
+<meta name="description" content="Split long text into a thread and post it in one go, with images, link cards, quotes and pinned embeds.">
 <meta name="color-scheme" content="light dark">
-<meta name="theme-color" content="#f1f3f5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#161e27" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f8ff">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Splitter">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -16,16 +15,63 @@
 <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
 <style>
-  /* Colours follow Bluesky's own light and dim themes. */
+  /* Default palette: Atmosphere. Themes override these tokens for light and dark. */
   :root {
-    --bg: #f1f3f5; --panel: #fff; --text: #0b0f14; --muted: #6f869f;
-    --border: #dce2ea; --accent: #1083fe; --accent-soft: rgba(16, 131, 254, 0.1); --warn: #ec4868;
-    --shadow: 0 1px 2px rgba(11, 15, 20, 0.06), 0 2px 8px rgba(11, 15, 20, 0.04);
+    --bg: #f4f8ff; --panel: #fff; --text: #122033; --muted: #5d738a;
+    --border: #d7e5f5; --accent: #2f8fee; --accent-soft: rgba(47, 143, 238, 0.12);
+    --on-accent: #fff; --warn: #e2556d;
+    --shadow: 0 1px 2px rgba(18, 32, 51, 0.06), 0 2px 8px rgba(18, 32, 51, 0.04);
   }
   @media (prefers-color-scheme: dark) {
     :root {
+      --bg: #0c1622; --panel: #132232; --text: #eaf4ff; --muted: #8aa6bf;
+      --border: #233a50; --accent: #6cb8ff; --accent-soft: rgba(108, 184, 255, 0.18);
+      --on-accent: #061b2c; --warn: #ff7b8a;
+      --shadow: none;
+    }
+  }
+  /* Bluesky blue: the network's own brand palette. */
+  html[data-theme="bluesky"] {
+    --bg: #f9fafb; --panel: #fff; --text: #232e3e; --muted: #66788c;
+    --border: #dbe3ec; --accent: #0560ff; --accent-soft: rgba(5, 96, 255, 0.1);
+    --on-accent: #fff; --warn: #ec4868;
+    --shadow: 0 1px 2px rgba(35, 46, 62, 0.06), 0 2px 8px rgba(35, 46, 62, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-theme="bluesky"] {
       --bg: #161e27; --panel: #1c2736; --text: #f1f3f5; --muted: #8798b0;
-      --border: #2e4052; --accent: #1083fe; --accent-soft: rgba(16, 131, 254, 0.16); --warn: #ff6b81;
+      --border: #2e4052; --accent: #75afff; --accent-soft: rgba(117, 175, 255, 0.18);
+      --on-accent: #0b1524; --warn: #ff6b81;
+      --shadow: none;
+    }
+  }
+  /* Blacksky: black and indigo. */
+  html[data-theme="blacksky"] {
+    --bg: #f8faf9; --panel: #fff; --text: #070c0c; --muted: #5f6b6b;
+    --border: #e1e8e4; --accent: #6060e9; --accent-soft: rgba(96, 96, 233, 0.12);
+    --on-accent: #fff; --warn: #c2410c;
+    --shadow: 0 1px 2px rgba(7, 12, 12, 0.06), 0 2px 8px rgba(7, 12, 12, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-theme="blacksky"] {
+      --bg: #070c0c; --panel: #161e27; --text: #f8faf9; --muted: #9aa8a8;
+      --border: #2a3a3a; --accent: #8a8aff; --accent-soft: rgba(138, 138, 255, 0.16);
+      --on-accent: #0a0a1a; --warn: #ff8a8a;
+      --shadow: none;
+    }
+  }
+  /* Mu.Social: the pink from the mu brand palette. */
+  html[data-theme="mu"] {
+    --bg: #fcfcfc; --panel: #fff; --text: #212121; --muted: #6b6b6b;
+    --border: #f0d9e9; --accent: #db4aa6; --accent-soft: rgba(219, 74, 166, 0.1);
+    --on-accent: #fff; --warn: #f2571f;
+    --shadow: 0 1px 2px rgba(33, 33, 33, 0.06), 0 2px 8px rgba(33, 33, 33, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    html[data-theme="mu"] {
+      --bg: #212121; --panel: #2d2430; --text: #f7f7f2; --muted: #c0aeb9;
+      --border: #4a3b47; --accent: #f8a2df; --accent-soft: rgba(248, 162, 223, 0.16);
+      --on-accent: #2a0d20; --warn: #ff8f36;
       --shadow: none;
     }
   }
@@ -59,6 +105,15 @@
   }
 
   .account { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex: none; max-width: 460px; }
+  .theme-row {
+    display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+    width: 100%; font-size: 13px; color: var(--muted);
+  }
+  .theme-row select {
+    max-width: 180px; padding: 4px 8px; font: inherit; font-size: 13px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
+  }
+  .theme-row select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   .fields { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
   .fields > input {
     width: 180px; padding: 7px 12px; font: inherit; font-size: 14px;
@@ -129,7 +184,7 @@
   button:disabled { opacity: 0.45; cursor: default; }
   button.primary {
     font-size: 15px; font-weight: 600; padding: 9px 22px;
-    background: var(--accent); color: #fff; border-color: var(--accent);
+    background: var(--accent); color: var(--on-accent); border-color: var(--accent);
   }
   button.primary.small { font-size: 14px; padding: 7px 16px; }
   button.icon { display: grid; place-items: center; padding: 6px; border: none; color: var(--muted); }
@@ -186,7 +241,7 @@
     position: absolute; top: 6px; right: 38px; z-index: 1; display: grid; place-items: center;
     padding: 3px 6px; background: rgba(0, 0, 0, 0.6); color: #fff; border: none;
   }
-  .card .pin.on { background: var(--accent); }
+  .card .pin.on { background: var(--accent); color: var(--on-accent); }
   .card .pin svg {
     width: 14px; height: 14px; fill: none; stroke: currentColor;
     stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
@@ -256,18 +311,36 @@
   .sug .none { padding: 8px; font-size: 13px; color: var(--muted); }
   .post-text .mention { color: var(--accent); }
 </style>
+<script>
+  // Apply the saved theme before the first paint. Built-ins are CSS selectors; a community
+  // theme uses the cached token block from its last visit, then gets refreshed after load.
+  (function () {
+    try {
+      var slug = localStorage.getItem('splitter-theme');
+      if (!slug || !/^[a-z0-9-]{1,40}$/.test(slug)) return;
+      document.documentElement.dataset.theme = slug;
+      var cached = JSON.parse(localStorage.getItem('splitter-theme-css') || 'null');
+      if (cached && cached.slug === slug && cached.css) {
+        var style = document.createElement('style');
+        style.id = 'theme-vars';
+        style.textContent = cached.css;
+        document.head.appendChild(style);
+      }
+    } catch (e) {}
+  })();
+</script>
 </head>
 <body>
 <header>
   <div>
-    <h1>Bluesky Splitter</h1>
+    <h1>Atmosphere Splitter</h1>
     <p>Paste text on the left and it's split into posts of up to 300 characters, breaking at sentences where it can
       and keeping posts roughly even. Add images to any post, then post the whole thread at once.</p>
   </div>
   <div class="account">
     <div class="fields" id="signInRow">
       <input id="handle" placeholder="you.bsky.social" autocomplete="username" spellcheck="false" autocapitalize="none">
-      <button id="oauthBtn" class="primary small" type="button">Sign in with Bluesky</button>
+      <button id="oauthBtn" class="primary small" type="button">Sign in with Atmosphere</button>
     </div>
     <div class="fields" id="whoRow" hidden>
       <span class="who">Signed in as <strong id="whoHandle"></strong></span>
@@ -290,6 +363,10 @@
     <p class="note" id="iosNote" hidden>To install on an iPhone or iPad, open this page in Safari, sign in there,
       then Share → Add to Home Screen. A home-screen app has its own storage and can't finish the sign-in
       redirect.</p>
+    <div class="theme-row">
+      <label for="themeSelect">Theme</label>
+      <select id="themeSelect" aria-label="Theme"></select>
+    </div>
   </div>
 </header>
 <main>
@@ -418,8 +495,8 @@ async function xrpc(host, method, body, token) {
 }
 
 // Small JSON GET; surfaces the server's message when there is one.
-async function getJson(url) {
-  const res = await fetch(url);
+async function getJson(url, options) {
+  const res = await fetch(url, options);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || data.error_description || `${url} failed (${res.status})`);
   return data;
@@ -554,7 +631,7 @@ function loadQuote(url) {
         entry.data = {
           uri: post.uri,
           cid: post.cid,
-          name: post.author?.displayName || post.author?.handle || 'Bluesky user',
+          name: post.author?.displayName || post.author?.handle || 'Someone',
           handle: post.author?.handle || '',
           avatar: post.author?.avatar || '',
           text: post.record?.text || '',
@@ -921,7 +998,7 @@ async function startOAuth() {
     const res = await dpopFetch(as.par, { form: body, key });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data.error_description || data.error || `Bluesky rejected the sign-in request (${res.status}).`);
+      throw new Error(data.error_description || data.error || `The sign-in service rejected the request (${res.status}).`);
     }
     await kvSet('oauth-flow', {
       state, verifier, key,
@@ -974,11 +1051,11 @@ async function finishOAuth() {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(data.error_description || data.error || `Bluesky could not finish sign-in (${res.status}).`);
+      throw new Error(data.error_description || data.error || `The sign-in service could not finish sign-in (${res.status}).`);
     }
     if (data.sub !== flow.did) throw new Error('That sign-in authorized a different account. Try again.');
     if (!(data.scope || '').split(' ').includes('atproto')) {
-      throw new Error('Bluesky did not grant the atproto scope, so nothing was saved.');
+      throw new Error('The sign-in service did not grant the atproto scope, so nothing was saved.');
     }
     oauth = {
       did: flow.did, handle: flow.handle, pds: flow.pds,
@@ -1013,7 +1090,7 @@ async function doRefresh(session) {
     }),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error_description || data.error || 'The Bluesky session has expired.');
+  if (!res.ok) throw new Error(data.error_description || data.error || 'The session has expired.');
   session.accessToken = data.access_token;
   if (data.refresh_token) session.refreshToken = data.refresh_token;
   session.expiresAt = Date.now() + (data.expires_in || 300) * 1000;
@@ -1051,7 +1128,7 @@ async function oauthXrpc(method, body) {
   } catch {
     await forgetSession();
     renderAuth();
-    throw new Error('Your Bluesky session expired. Sign in again.');
+    throw new Error('Your session expired. Sign in again.');
   }
   let res = await send(token);
   if (res.status === 401) {
@@ -1061,7 +1138,7 @@ async function oauthXrpc(method, body) {
     } catch {
       await forgetSession();
       renderAuth();
-      throw new Error('Your Bluesky session expired. Sign in again.');
+      throw new Error('Your session expired. Sign in again.');
     }
     res = await send(token);
   }
@@ -1075,12 +1152,12 @@ async function oauthXrpc(method, body) {
 async function passwordAuth() {
   const handle = handleEl.value.trim().replace(/^@/, '');
   const password = passwordEl.value.trim();
-  if (!handle || !password) throw new Error('Sign in with Bluesky, or enter your handle and app password.');
+  if (!handle || !password) throw new Error('Sign in, or enter your handle and app password.');
   const session = await xrpc(PDS_DEFAULT, 'com.atproto.server.createSession', { identifier: handle, password });
   if (sessionScope(session.accessJwt) === 'com.atproto.access') {
     passwordEl.value = '';
     forgetPassword();
-    throw new Error('That is your account password. Use an app password instead, or sign in with Bluesky.');
+    throw new Error('That is your account password. Use an app password instead, or sign in with OAuth.');
   }
   const pds = session.didDoc?.service?.find(s => s.id === '#atproto_pds')?.serviceEndpoint || PDS_DEFAULT;
   return {
@@ -1120,7 +1197,7 @@ async function postThread() {
     const auth = await getAuth();
     const n = thread.posts.length, done = thread.refs.length;
     const what = done ? `the remaining ${n - done} of ${n} posts` : `${n} post${n > 1 ? 's' : ''}`;
-    if (!confirm(`Post ${what} to Bluesky as @${auth.handle}?`)) return;
+    if (!confirm(`Post ${what} as @${auth.handle}?`)) return;
 
     thread.did = auth.did;
     updateThreadUI();
@@ -1299,15 +1376,15 @@ function showAuthIssue(reason) {
   };
   if (reason === 'localhost') {
     const url = `http://127.0.0.1:${location.port || 80}${location.pathname}`;
-    oauthNote.append('Bluesky rejects "localhost" as a sign-in address. Open ', open(url), ' instead.');
+    oauthNote.append('Sign-in rejects "localhost" as an address. Open ', open(url), ' instead.');
   } else if (reason === 'file') {
-    oauthNote.append('Signing in with Bluesky needs a local server: run ' +
+    oauthNote.append('Signing in needs a local server: run ' +
       'python3 -m http.server 8000 --bind 127.0.0.1 and open http://127.0.0.1:8000/. ' +
       'An app password still works here.');
   } else if (reason === 'hosted') {
     oauthNote.append('Sign-in is set up for a local server only. Run it on 127.0.0.1, or use an app password.');
   } else {
-    oauthNote.append('Signing in with Bluesky needs http://127.0.0.1 or https. An app password still works.');
+    oauthNote.append('Signing in needs http://127.0.0.1 or https. An app password still works.');
   }
   oauthNote.hidden = false;
 }
@@ -1328,6 +1405,171 @@ function renderAuth() {
   }
   updateThreadUI();
 }
+
+// ---- Themes ----
+// Built-ins live in CSS so they apply before the first paint and work from file://. Community
+// themes live in themes/ and are loaded over HTTP; their token block is cached locally so the
+// last choice also applies before paint on the next visit.
+const THEME_KEY = 'splitter-theme';
+const THEME_CSS_KEY = 'splitter-theme-css';
+const THEME_TOKENS = ['--bg', '--panel', '--text', '--muted', '--border', '--accent', '--accent-soft', '--on-accent', '--warn', '--shadow'];
+const BUILTIN_THEMES = [
+  { slug: 'atmosphere', name: 'Atmosphere', signIn: 'Atmosphere', description: 'Light blue, the neutral default.' },
+  { slug: 'bluesky', name: 'Bluesky', signIn: 'Bluesky', description: 'Bluesky blue.' },
+  { slug: 'blacksky', name: 'Blacksky', signIn: 'Blacksky', description: 'Blacksky black and indigo.' },
+  { slug: 'mu', name: 'Mu.Social', signIn: 'Mu', description: 'Mu.Social pink.' },
+];
+const themeSelect = document.getElementById('themeSelect');
+const themeMedia = matchMedia('(prefers-color-scheme: dark)');
+let themes = BUILTIN_THEMES.map(t => ({ ...t, builtin: true }));
+let currentTheme = themes[0];
+
+const validThemeSlug = slug => typeof slug === 'string' && /^[a-z0-9-]{1,40}$/.test(slug);
+
+// Only the colour tokens, and only values that cannot break out of the declaration.
+function themeTokens(vars) {
+  return THEME_TOKENS
+    .filter(name => typeof vars?.[name] === 'string' && /^[#a-zA-Z0-9(),.%\s/-]+$/.test(vars[name]))
+    .map(name => `${name}:${vars[name]};`).join('');
+}
+
+function themeCss(theme) {
+  const light = themeTokens(theme.light);
+  const dark = themeTokens(theme.dark);
+  if (!light && !dark) return '';
+  return `html[data-theme="${theme.slug}"]{${light}}` +
+    (dark ? `@media (prefers-color-scheme: dark){html[data-theme="${theme.slug}"]{${dark}}}` : '');
+}
+
+function updateThemeColor() {
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+  if (bg) meta.content = bg;
+}
+
+function updateSignInLabel() {
+  oauthBtn.textContent = `Sign in with ${currentTheme.signIn || 'Atmosphere'}`;
+}
+
+function applyTheme(slug, persist = true) {
+  const theme = themes.find(t => t.slug === slug) || themes[0];
+  currentTheme = theme;
+  document.documentElement.dataset.theme = theme.slug;
+  const style = document.getElementById('theme-vars');
+  if (theme.builtin) {
+    style?.remove();
+    document.getElementById('theme-css')?.remove();
+    try { localStorage.removeItem(THEME_CSS_KEY); } catch {}
+  } else {
+    const css = themeCss(theme);
+    if (!css) return applyTheme('atmosphere', persist);
+    let block = style;
+    if (!block) {
+      block = document.createElement('style');
+      block.id = 'theme-vars';
+      document.head.append(block);
+    }
+    block.textContent = css;
+    try { localStorage.setItem(THEME_CSS_KEY, JSON.stringify({ slug: theme.slug, name: theme.name, signIn: theme.signIn, css })); } catch {}
+    let link = document.getElementById('theme-css');
+    if (theme.css && theme.url) {
+      if (!link) {
+        link = document.createElement('link');
+        link.id = 'theme-css';
+        link.rel = 'stylesheet';
+        document.head.append(link);
+      }
+      link.href = new URL(theme.css, theme.url).href;
+    } else {
+      link?.remove();
+    }
+  }
+  if (persist) { try { localStorage.setItem(THEME_KEY, theme.slug); } catch {} }
+  themeSelect.value = theme.slug;
+  updateSignInLabel();
+  updateThemeColor();
+}
+
+function rebuildThemeSelect() {
+  themeSelect.replaceChildren(...themes.map(t => {
+    const option = document.createElement('option');
+    option.value = t.slug;
+    option.textContent = t.name;
+    if (t.description) option.title = t.description;
+    return option;
+  }));
+  themeSelect.value = themes.some(t => t.slug === currentTheme.slug) ? currentTheme.slug : 'atmosphere';
+}
+
+async function loadCommunityThemes(saved) {
+  if (!location.protocol.startsWith('http')) return;  // file:// cannot fetch the index
+  try {
+    const indexUrl = new URL('./themes/index.json', location.href);
+    const index = await getJson(indexUrl.href, { cache: 'no-store' });
+    const paths = Array.isArray(index) ? index : Array.isArray(index.themes) ? index.themes : [];
+    const loaded = [];
+    for (const path of paths) {
+      try {
+        const url = new URL(path, indexUrl).href;
+        const data = await getJson(url, { cache: 'no-store' });
+        if (!data || !validThemeSlug(data.slug) || !data.name) continue;
+        if (typeof data.light !== 'object' || typeof data.dark !== 'object') continue;
+        if (!themeTokens(data.light) && !themeTokens(data.dark)) continue;
+        if (BUILTIN_THEMES.some(t => t.slug === data.slug) || loaded.some(t => t.slug === data.slug)) continue;
+        loaded.push({ ...data, url, builtin: false });
+      } catch {}  // one bad theme must not hide the rest
+    }
+    themes = [...BUILTIN_THEMES.map(t => ({ ...t, builtin: true })), ...loaded];
+    const chosen = themes.find(t => t.slug === saved);
+    if (!chosen) {
+      // The saved community theme was removed; do not keep its cached colours.
+      applyTheme('atmosphere');
+      rebuildThemeSelect();
+      return;
+    }
+    currentTheme = chosen;
+    rebuildThemeSelect();
+    applyTheme(chosen.slug, false);
+  } catch {
+    // Missing index or offline: keep the built-ins, and keep a cached community theme if it
+    // was the saved choice for this visit.
+  }
+}
+
+function initThemes() {
+  let saved = '';
+  let cached = null;
+  try {
+    saved = localStorage.getItem(THEME_KEY) || '';
+    cached = JSON.parse(localStorage.getItem(THEME_CSS_KEY) || 'null');
+  } catch {}
+  if (!validThemeSlug(saved)) saved = 'atmosphere';
+  const builtin = themes.find(t => t.slug === saved && t.builtin);
+  if (builtin) {
+    currentTheme = builtin;
+    document.documentElement.dataset.theme = saved;
+    document.getElementById('theme-vars')?.remove();
+  } else if (cached && cached.slug === saved && cached.css) {
+    // The head script already applied this cached block; show its name until fresh data lands.
+    const placeholder = { slug: saved, name: cached.name || saved, signIn: cached.signIn || 'Atmosphere', builtin: false, placeholder: true };
+    themes.push(placeholder);
+    currentTheme = placeholder;
+    document.documentElement.dataset.theme = saved;
+  } else {
+    saved = 'atmosphere';
+    currentTheme = themes.find(t => t.slug === 'atmosphere');
+    document.documentElement.dataset.theme = saved;
+    document.getElementById('theme-vars')?.remove();
+  }
+  rebuildThemeSelect();
+  updateSignInLabel();
+  updateThemeColor();
+  loadCommunityThemes(saved);
+}
+
+themeSelect.addEventListener('change', () => applyTheme(themeSelect.value));
+themeMedia.addEventListener('change', updateThemeColor);
 
 let renderTimer = null;
 
@@ -1901,6 +2143,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 
 // ---- Boot ----
 (async () => {
+  initThemes();
   handleEl.value = store.get('bsky-handle');
   passwordEl.value = store.get('bsky-app-password');
   rememberEl.checked = !!passwordEl.value;

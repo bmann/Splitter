@@ -1,7 +1,7 @@
 // Caches the app shell so Splitter opens offline.
 // Cross-origin requests are never intercepted: posting, identity resolution and link
 // previews must always hit the network, and a cached POST would be a lie.
-const VERSION = 'splitter-v10';
+const VERSION = 'splitter-v11';
 const SHELL = [
   './',
   './index.html',

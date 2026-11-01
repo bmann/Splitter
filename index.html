@@ -131,6 +131,8 @@
     border-radius: 999px; background: var(--accent-soft); color: var(--accent);
     font-size: 12px; line-height: 1.5;
   }
+  .tag-count { font-size: 11px; color: var(--muted); }
+  .tag-count.over { color: var(--warn); font-weight: 600; }
   .chip button {
     padding: 0 0 0 2px; border: none; background: transparent; color: inherit;
     font-size: 14px; line-height: 1; cursor: pointer;
@@ -141,13 +143,17 @@
     border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text);
   }
   .tag-input:focus, .tag-add:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-  .post-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+  .post-tags {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+    padding: 0 16px 0 56px;
+  }
   .post-tags .chips { margin: 0; }
   .post-tags .tag-add {
     width: 92px; padding: 2px 8px; border-style: dashed; border-radius: 999px;
     font-size: 12px; color: var(--muted);
   }
   .post-tags .tag-add:focus { color: var(--text); }
+  .prior-wrap .post-tags { opacity: 0.7; }
   .fields { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
   .fields > input {
     width: 180px; padding: 7px 12px; font: inherit; font-size: 14px;
@@ -185,7 +191,11 @@
     background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
     box-shadow: var(--shadow); padding: 16px;
   }
-  .post:not(:last-child)::after {
+  .post-wrap {
+    position: relative; display: flex; flex-direction: column; gap: 6px;
+    min-width: 0;
+  }
+  .post-wrap:not(:last-child)::after {
     content: ''; position: absolute; left: 29px; top: 100%; width: 2px; height: 14px; background: var(--border);
   }
   .num {
@@ -410,7 +420,7 @@
     <div class="tags-panel">
       <div class="tags-head">
         <label for="threadTagInput">Tags for every post</label>
-        <span class="tags-hint">Enter or comma</span>
+        <span class="tags-hint">Enter or comma · max 8</span>
       </div>
       <div class="chips" id="threadTagChips"></div>
       <input id="threadTagInput" class="tag-input" placeholder="Add a tag, e.g. #bluesky"
@@ -1234,22 +1244,24 @@ async function postThread() {
   if (busy) return;
   if (renderTimer) render();  // pick up any typing still waiting to re-split
   const posts = finalPosts();
-  if (posts.some(p => glen(p) > LIMIT)) {
-    threadMsg.textContent = 'A post is over 300 characters. Remove a tag or shorten the text.';
+  const tags = tagSets();
+  if (tags.some(t => t.length > MAX_TAGS)) {
+    threadMsg.textContent = `A post can have at most ${MAX_TAGS} tags. Remove one or more tags.`;
     return;
   }
   busy = true;
   threadMsg.textContent = 'Signing in…';
   try {
     // Set up the thread first, so a sign-in failure has somewhere to be reported.
-    const key = posts.join('\0');
+    const key = posts.map((p, i) => `${p}\0${tags[i].join('\u0001')}`).join('\0');
     if (!thread || thread.key !== key) {
       thread = {
-        key, posts, refs: [], root: continuation?.root || null,
+        key, posts, tags, refs: [], root: continuation?.root || null,
         parent: continuation?.parent || null,
       };
       if (!continuation) history = [];  // a fresh thread, not an extension
     }
+    thread.tags = tags;
     thread.error = null;
     const auth = await getAuth();
     const n = thread.posts.length, done = thread.refs.length;
@@ -1265,6 +1277,7 @@ async function postThread() {
       const dids = await resolveMentions(text, auth);
       const f = facets(text, dids);
       if (f.length) record.facets = f;
+      if (thread.tags?.[i]?.length) record.tags = thread.tags[i];
       if (i > 0) {
         record.reply = { root: thread.root || thread.refs[0], parent: thread.refs[i - 1] };
       } else if (thread.parent) {
@@ -1327,7 +1340,7 @@ const media = [];
 // losing the embed. Like media, a pin follows the post slot, and the preview shows where it sits.
 const pins = [];
 // Tags: thread-wide tags apply to every post; per-post additions and removals are indexed by
-// post slot, like media and pins. Tags are appended to the post text so facets() handles them.
+// post slot, like media and pins. Tags are sent out-of-band in record.tags, not appended to text.
 let threadTags = [];              // display strings without '#'
 const postTagAdds = [];           // per post: tags added just to that post
 const postTagRemovals = [];       // per post: thread tags removed from that post
@@ -1336,7 +1349,7 @@ const threadTagInput = document.getElementById('threadTagInput');
 const threadTagChips = document.getElementById('threadTagChips');
 const tagKey = tag => tag.toLowerCase();
 
-const liveThread = () => (thread && thread.key === finalPosts().join('\0') ? thread : null);
+const liveThread = () => (thread && thread.key === threadSignature() ? thread : null);
 
 function normalizeTag(raw) {
   let tag = String(raw).trim().replace(/^#+/, '').replace(/[.,;:!?()]+$/, '');
@@ -1367,31 +1380,35 @@ function effectiveTags(i) {
   return tags;
 }
 
-// Tags already present in the body are not appended again; body hashtags stay user-owned text.
-function appendedTags(i) {
+// Out-of-band tags become record.tags, not text facets. Tags already present in the body are
+// left to the body facet and are not duplicated in the tags array.
+function outOfBandTags(i) {
   const present = bodyTagKeys(currentPosts[i] || '');
   return effectiveTags(i).filter(t => !present.has(tagKey(t)));
 }
 
-function tagSuffix(i) {
-  const tags = appendedTags(i);
-  return tags.length ? ' ' + tags.map(t => '#' + t).join(' ') : '';
-}
-
-const finalPost = i => (currentPosts[i] || '') + tagSuffix(i);
-const finalPosts = () => currentPosts.map((_, i) => finalPost(i));
+const MAX_TAGS = 8;  // app.bsky.feed.post.tags maxLength
+const finalPost = i => currentPosts[i] || '';
+const finalPosts = () => currentPosts.slice();
+const tagSets = () => currentPosts.map((_, i) => outOfBandTags(i));
+const threadSignature = () => {
+  const tags = tagSets();
+  return finalPosts().map((p, i) => `${p}\0${tags[i].join('\u0001')}`).join('\0');
+};
 
 function tagChip(tag, onRemove) {
   const chip = document.createElement('span');
   chip.className = 'chip';
   chip.append(`#${tag}`);
-  const remove = document.createElement('button');
-  remove.type = 'button';
-  remove.textContent = '×';
-  remove.title = `Remove #${tag}`;
-  remove.setAttribute('aria-label', `Remove #${tag}`);
-  remove.onclick = onRemove;
-  chip.append(remove);
+  if (onRemove) {
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = '×';
+    remove.title = `Remove #${tag}`;
+    remove.setAttribute('aria-label', `Remove #${tag}`);
+    remove.onclick = onRemove;
+    chip.append(remove);
+  }
   return chip;
 }
 
@@ -1401,12 +1418,15 @@ function renderThreadTags() {
 
 function renderPostTags(container, i) {
   container.replaceChildren();
-  const tags = appendedTags(i);
+  const tags = outOfBandTags(i);
   if (tags.length) {
     const chips = document.createElement('div');
     chips.className = 'chips';
     for (const tag of tags) chips.append(tagChip(tag, () => removePostTag(i, tag)));
-    container.append(chips);
+    const count = document.createElement('span');
+    count.className = `tag-count${tags.length > MAX_TAGS ? ' over' : ''}`;
+    count.textContent = `${tags.length}/${MAX_TAGS}`;
+    container.append(chips, count);
   }
   const add = document.createElement('input');
   add.type = 'text';
@@ -1470,7 +1490,7 @@ function addPostTag(i, raw) {
   const present = bodyTagKeys(currentPosts[i] || '');
   for (const tag of tags) {
     const key = tagKey(tag);
-    if (present.has(key)) continue;  // already in the body, so appending it would duplicate
+    if (present.has(key)) continue;  // already a body hashtag, so it stays a facet
     if (globalKeys.has(key)) {
       const removals = (postTagRemovals[i] ||= []);
       for (let j = removals.length - 1; j >= 0; j--) if (tagKey(removals[j]) === key) removals.splice(j, 1);
@@ -1544,7 +1564,9 @@ function startContinue() {
   if (busy || !t || t.error || t.posts.length !== t.refs.length || !t.refs.length) return;
   const root = t.root || t.refs[0];
   const parent = t.refs[t.refs.length - 1];
-  history = [...history, ...t.posts.map((text, i) => ({ text, ref: t.refs[i] }))];
+  history = [...history, ...t.posts.map((text, i) => ({
+    text, ref: t.refs[i], tags: (t.tags || [])[i] || [],
+  }))];
   continuation = { root, parent };
   resetComposer();
   render();
@@ -1572,7 +1594,7 @@ function updateThreadUI() {
   const t = liveThread();
   const done = t ? t.refs.length : 0;
   const complete = !!(t && n && done === n && !t.error);
-  const over = finalPosts().some(p => glen(p) > LIMIT);
+  const tooManyTags = tagSets().some(tags => tags.length > MAX_TAGS);
   statusEls.forEach((el, i) => {
     el.textContent = i < done ? '✓ Posted' : t?.error && i === done ? '✗ Failed' : '';
     el.className = i < done ? 'ok' : 'err';
@@ -1580,7 +1602,7 @@ function updateThreadUI() {
   postBtn.hidden = complete;
   afterPost.hidden = !complete;
   newThreadBtn.disabled = continueBtn.disabled = busy;
-  postBtn.disabled = busy || !n || done === n || over;
+  postBtn.disabled = busy || !n || done === n || tooManyTags;
   postBtn.textContent = done === n && n ? 'Posted'
     : done ? `Resume (${done} of ${n} posted)`
     : continuation ? `Post ${n > 1 ? 'replies' : 'reply'}` : 'Post thread';
@@ -1589,9 +1611,9 @@ function updateThreadUI() {
   if (t?.error) {
     threadMsg.innerHTML = '<span class="err"></span>';
     threadMsg.firstChild.textContent = t.error;
-  } else if (over) {
+  } else if (tooManyTags) {
     threadMsg.innerHTML = '<span class="err"></span>';
-    threadMsg.firstChild.textContent = 'A post is over 300 characters. Remove a tag or shorten the text.';
+    threadMsg.firstChild.textContent = `A post can have at most ${MAX_TAGS} tags. Remove one or more tags.`;
   } else if (complete) {
     const root = t.root || t.refs[0];
     const a = document.createElement('a');
@@ -2066,12 +2088,24 @@ const ICON = {
 
 // An already-published post from an earlier segment, shown read-only while continuing.
 function priorCard(entry) {
+  const wrap = document.createElement('div');
+  wrap.className = 'post-wrap prior-wrap';
   const card = document.createElement('div');
   card.className = 'post prior';
   card.innerHTML = '<div class="num">✓</div><div class="body"><div class="post-text"></div>' +
     '<div class="post-foot"><span class="ok">Posted</span></div></div>';
   richText(card.querySelector('.post-text'), entry.text, mentionDids);
-  return card;
+  wrap.append(card);
+  if (entry.tags?.length) {
+    const row = document.createElement('div');
+    row.className = 'post-tags static';
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    for (const tag of entry.tags) chips.append(tagChip(tag, null));
+    row.append(chips);
+    wrap.append(row);
+  }
+  return wrap;
 }
 
 function render() {
@@ -2079,9 +2113,7 @@ function render() {
   renderTimer = null;
   const text = input.value;
   totalEl.textContent = text.trim() ? `${glen(text.trim())} characters` : '';
-  const threadSuffix = threadTags.length ? ' ' + threadTags.map(t => '#' + t).join(' ') : '';
-  const bodyLimit = Math.max(1, LIMIT - glen(threadSuffix));
-  const posts = split(text, bodyLimit);
+  const posts = split(text);
   currentPosts = posts;
   statusEls = [];
   const t = liveThread();
@@ -2110,7 +2142,7 @@ function render() {
     const imgs = media[i] || [];
     const card = document.createElement('div');
     card.className = 'post';
-    card.innerHTML = `<div class="num">${i + 1}</div><div class="body"><div class="post-text"></div><div class="post-tags"></div><div class="thumbs"></div><div class="card-slot"></div>
+    card.innerHTML = `<div class="num">${i + 1}</div><div class="body"><div class="post-text"></div><div class="thumbs"></div><div class="card-slot"></div>
       <div class="post-foot"><span class="count${len > LIMIT ? ' over' : ''}">
         <svg class="ring" viewBox="0 0 20 20"><circle class="track" cx="10" cy="10" r="8"/>
         <circle class="fill" cx="10" cy="10" r="8" pathLength="100" stroke-dasharray="${Math.min(100, len / LIMIT * 100)} 100"/></svg>
@@ -2118,7 +2150,6 @@ function render() {
       <span class="actions"><span></span><button class="icon add" title="Add image" aria-label="Add image">${ICON.image}</button></span></div></div>
       <input type="file" accept="image/*" multiple hidden>`;
     richText(card.querySelector('.post-text'), postText, mentionDids);
-    renderPostTags(card.querySelector('.post-tags'), i);
     statusEls.push(card.querySelector('.actions span'));
 
     const fileIn = card.querySelector('input[type=file]');
@@ -2147,7 +2178,13 @@ function render() {
     // A preview is only possible when the post has no images: images win in the record.
     if (!imgs.length) renderPreview(card.querySelector('.card-slot'), i, postText);
 
-    postsEl.append(card);
+    const wrap = document.createElement('div');
+    wrap.className = 'post-wrap';
+    const tagsRow = document.createElement('div');
+    tagsRow.className = 'post-tags';
+    renderPostTags(tagsRow, i);
+    wrap.append(card, tagsRow);
+    postsEl.append(wrap);
   });
   primeMentions(posts);
   renderThreadTags();

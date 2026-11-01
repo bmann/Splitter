@@ -37,13 +37,13 @@ stays plain text instead of failing the post.
 
 ### Tags on every post
 
-![Thread-wide and per-post tag chips in the composer](docs/screenshots/tags.png)
+![Thread-wide and per-post tag pills under the post cards](docs/screenshots/tags.png)
 
-Add tags in the left panel once and they are appended to every post in the thread. In the preview,
-use **+ tag** to add one to a single post, or **×** to remove a thread-wide tag from just that post.
-Tags become normal hashtag facets, count toward the 300-character limit, and the splitter reserves
-space for the thread-wide set. A tag already typed in the post body is not appended again;
-per-post tags that push a post over the limit are flagged and block posting.
+Add tags in the left panel once and they are attached to every post as out-of-band
+`app.bsky.feed.post.tags` — the body text is untouched. In the preview, the pills under each post
+show its tags: use **+ tag** to add one to a single post, or **×** to remove a thread-wide tag from
+just that post. Up to 8 tags per post; tags already typed in the body are not duplicated, and going
+over 8 is flagged and blocks posting.
 
 ### Link previews
 

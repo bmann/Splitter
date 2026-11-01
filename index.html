@@ -1684,14 +1684,23 @@ function showAvatar(url) {
   else whoAvatar.removeAttribute('src');
 }
 
-// The OAuth session carries the handle but not the avatar. Fetch the profile once and keep the
-// avatar on the session, so later loads show it immediately.
+// The OAuth session carries the handle but not the avatar. Typeahead already indexes actors and
+// their avatars, so ask it first and fall back to the authoritative appview profile when it does
+// not know the account. Keep the answer on the session so later loads show it immediately.
 async function loadAvatar() {
   if (!oauth || 'avatar' in oauth) return;
   const session = oauth;
   try {
-    const profile = await getJson(
-      `${PUBLIC_API}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(session.did)}`);
+    let profile = null;
+    try {
+      const actors = await searchActors(session.handle);
+      profile = actors.find(a => a.did === session.did) ||
+        actors.find(a => a.handle.toLowerCase() === session.handle.toLowerCase());
+    } catch {}
+    if (!profile) {
+      profile = await getJson(
+        `${PUBLIC_API}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(session.did)}`);
+    }
     if (oauth !== session) return;  // signed out or switched while the fetch was in flight
     if (profile.handle) session.handle = profile.handle;
     session.avatar = profile.avatar || '';

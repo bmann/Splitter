@@ -147,7 +147,8 @@ back signed in. It asks for one narrow permission — create posts, including up
 cannot read your timeline, change your profile, or delete posts.
 
 Once signed in, the header shows your avatar and handle and the button becomes **Logout**. The avatar
-is read once from `public.api.bsky.app` and kept with the session.
+comes from the same typeahead index used for `@` completion, falling back to
+`public.api.bsky.app` if that index doesn't know your account.
 
 A few things are worth knowing:
 
@@ -169,7 +170,7 @@ Everything runs in your browser. Your text, images and credentials go only to Bl
 are fetched through `cardyb.bsky.app`, the same service Bluesky's own app uses. Handle search goes to
 `typeahead.waow.tech`, a community actor search for atproto, which sees the letters you type after
 `@`; resolving a handle asks `public.api.bsky.app`, and a quoted-post permalink is also resolved
-there, sending only that URL. `did:plc` documents come from `plc.directory`. None of them see your
+there, sending only that URL. Your own handle goes to the typeahead once, to load the header avatar. `did:plc` documents come from `plc.directory`. None of them see your
 posts. The handle is remembered locally. An app password is saved in local storage only if you tick
 "Remember" — any other page on the same address can read it, so leave that off on shared machines.
 OAuth tokens and the signing key live in IndexedDB, never in local storage.

@@ -6,7 +6,7 @@ Splitter ships with four themes:
 | --- | --- |
 | Atmosphere | light blue, the neutral default |
 | Bluesky | Bluesky blue |
-| Blacksky | Blacksky black and indigo |
+| Blacksky | Blacksky black and green |
 | Mu.Social | Mu.Social pink |
 
 Built-ins are in `index.html`, so they work from `file://` and apply before the first paint.

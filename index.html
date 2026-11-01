@@ -401,9 +401,8 @@
     <p class="note" id="oauthNote" hidden></p>
     <p class="err-note" id="authMsg" hidden></p>
     <button id="installBtn" type="button" hidden>Install app</button>
-    <p class="note" id="iosNote" hidden>To install on an iPhone or iPad, open this page in Safari, sign in there,
-      then Share → Add to Home Screen. A home-screen app has its own storage and can't finish the sign-in
-      redirect.</p>
+    <p class="note" id="iosNote" hidden>On iPhone and iPad, Bluesky sign-in only finishes in a Safari tab. A
+      Home Screen app has its own storage and cannot complete the redirect, so sign in and post from Safari.</p>
     <div class="theme-row">
       <label for="themeSelect">Theme</label>
       <select id="themeSelect" aria-label="Theme"></select>
@@ -1037,6 +1036,7 @@ async function startOAuth() {
   const handle = handleEl.value.trim();
   if (!handle) { setAuthMsg('Enter your handle first.'); handleEl.focus(); return; }
   oauthBtn.disabled = true;
+  store.remove('splitter-auth-error');
   setAuthMsg('Looking up your account…', 'muted');
   try {
     const id = await resolveIdentity(handle);
@@ -1328,6 +1328,8 @@ const oauthBtn = document.getElementById('oauthBtn');
 const oauthNote = document.getElementById('oauthNote');
 const authMsg = document.getElementById('authMsg');
 const installBtn = document.getElementById('installBtn');
+const iosNote = document.getElementById('iosNote');
+const IOS = /iP(hone|ad|od)/.test(navigator.userAgent);
 let currentPosts = [];
 let statusEls = [];
 // Images attached to each post number: media[i] = [{ blob, url, alt, width, height }]
@@ -1627,6 +1629,9 @@ function setAuthMsg(text, kind = 'err') {
   authMsg.textContent = text || '';
   authMsg.hidden = !text;
   authMsg.className = kind === 'muted' ? 'note' : 'err-note';
+  // Keep a failed sign-in on screen across the reload iOS does after the redirect.
+  if (!text) store.remove('splitter-auth-error');
+  else if (kind === 'err') store.set('splitter-auth-error', text);
 }
 
 function showAuthIssue(reason) {
@@ -1656,6 +1661,7 @@ function renderAuth() {
   who.hidden = !signedIn;
   handleEl.hidden = signedIn;
   appPassDetails.hidden = signedIn;
+  iosNote.hidden = !IOS || signedIn;
   oauthNote.hidden = true;
   oauthBtn.disabled = false;
   updateSignInLabel();
@@ -2452,10 +2458,9 @@ installBtn.addEventListener('click', async () => {
 });
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
 if (standalone) installBtn.hidden = true;
-else if (/iP(hone|ad|od)/.test(navigator.userAgent)) document.getElementById('iosNote').hidden = false;
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-  addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+  addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' }).catch(() => {}));
 }
 
 // ---- Boot ----
@@ -2466,6 +2471,8 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   rememberEl.checked = !!passwordEl.value;
   oauth = await kvGet('oauth-session');
   await finishOAuth();
+  const authError = store.get('splitter-auth-error');
+  if (authError && !oauth) setAuthMsg(authError);
   loadAvatar();
   render();
   renderAuth();

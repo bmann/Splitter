@@ -38,6 +38,16 @@ All three become facets that Bluesky renders as links. Typing `@` searches accou
 stores the pick with its DID; hand-typed handles resolve the same way. A handle that doesn't resolve
 stays plain text instead of failing the post.
 
+### Tags on every post
+
+![Thread-wide and per-post tag pills under the post cards](docs/screenshots/tags.png)
+
+Add tags in the left panel once and they are attached to every post as out-of-band
+`app.bsky.feed.post.tags` — the body text is untouched. In the preview, the pills under each post
+show its tags: use **+ tag** to add one to a single post, or **×** to remove a thread-wide tag from
+just that post. Up to 8 tags per post; tags already typed in the body are not duplicated, and going
+over 8 is flagged and blocks posting.
+
 ### Link previews
 
 ![A link card preview under a post](docs/screenshots/link-card.png)

@@ -165,7 +165,11 @@
   .help summary { cursor: pointer; color: var(--accent); }
   .help p { margin: 6px 0 0; text-align: left; font-size: 13px; }
   .help .fields { justify-content: flex-start; margin-top: 6px; }
-  .who { font-size: 14px; color: var(--muted); }
+  .who { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); }
+  .who img {
+    width: 28px; height: 28px; border-radius: 50%; object-fit: cover;
+    background: var(--accent-soft); border: 1px solid var(--border);
+  }
   .who strong { color: var(--text); }
   .note { margin: 0; font-size: 13px; color: var(--muted); text-align: right; max-width: 46ch; }
   .err-note { margin: 0; font-size: 13px; color: var(--warn); text-align: right; max-width: 46ch; }
@@ -383,12 +387,12 @@
   </div>
   <div class="account">
     <div class="fields" id="signInRow">
+      <span class="who" id="who" hidden>
+        <img id="whoAvatar" alt="" referrerpolicy="no-referrer" hidden>
+        <strong id="whoHandle"></strong>
+      </span>
       <input id="handle" placeholder="you.bsky.social" autocomplete="username" spellcheck="false" autocapitalize="none">
       <button id="oauthBtn" class="primary small" type="button">Sign in with Atmosphere</button>
-    </div>
-    <div class="fields" id="whoRow" hidden>
-      <span class="who">Signed in as <strong id="whoHandle"></strong></span>
-      <button id="signOutBtn" type="button">Sign out</button>
     </div>
     <details class="help" id="appPassDetails">
       <summary>Use an app password instead</summary>
@@ -1323,12 +1327,11 @@ const threadMsg = document.getElementById('threadMsg');
 const afterPost = document.getElementById('afterPost');
 const newThreadBtn = document.getElementById('newThreadBtn');
 const continueBtn = document.getElementById('continueBtn');
-const signInRow = document.getElementById('signInRow');
-const whoRow = document.getElementById('whoRow');
+const who = document.getElementById('who');
+const whoAvatar = document.getElementById('whoAvatar');
 const whoHandle = document.getElementById('whoHandle');
 const appPassDetails = document.getElementById('appPassDetails');
 const oauthBtn = document.getElementById('oauthBtn');
-const signOutBtn = document.getElementById('signOutBtn');
 const oauthNote = document.getElementById('oauthNote');
 const authMsg = document.getElementById('authMsg');
 const installBtn = document.getElementById('installBtn');
@@ -1657,19 +1660,44 @@ function showAuthIssue(reason) {
 
 function renderAuth() {
   const signedIn = !!oauth;
-  whoRow.hidden = !signedIn;
-  signInRow.hidden = signedIn;
+  who.hidden = !signedIn;
+  handleEl.hidden = signedIn;
   appPassDetails.hidden = signedIn;
   oauthNote.hidden = true;
   oauthBtn.disabled = false;
+  updateSignInLabel();
   if (signedIn) {
     whoHandle.textContent = `@${oauth.handle}`;
     handleEl.value = oauth.handle;
+    showAvatar(oauth.avatar);
   } else {
+    showAvatar('');
     const client = clientIdFor(location);
     if (!client.ok) showAuthIssue(client.reason);
   }
   updateThreadUI();
+}
+
+function showAvatar(url) {
+  whoAvatar.hidden = !url;
+  if (url) whoAvatar.src = url;
+  else whoAvatar.removeAttribute('src');
+}
+
+// The OAuth session carries the handle but not the avatar. Fetch the profile once and keep the
+// avatar on the session, so later loads show it immediately.
+async function loadAvatar() {
+  if (!oauth || 'avatar' in oauth) return;
+  const session = oauth;
+  try {
+    const profile = await getJson(
+      `${PUBLIC_API}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(session.did)}`);
+    if (oauth !== session) return;  // signed out or switched while the fetch was in flight
+    if (profile.handle) session.handle = profile.handle;
+    session.avatar = profile.avatar || '';
+    await kvSet('oauth-session', session);
+    renderAuth();
+  } catch {}
 }
 
 // ---- Themes ----
@@ -1715,7 +1743,7 @@ function updateThemeColor() {
 }
 
 function updateSignInLabel() {
-  oauthBtn.textContent = `Sign in with ${currentTheme.signIn || 'Atmosphere'}`;
+  oauthBtn.textContent = oauth ? 'Logout' : `Sign in with ${currentTheme.signIn || 'Atmosphere'}`;
 }
 
 function applyTheme(slug, persist = true) {
@@ -2205,13 +2233,14 @@ handleEl.addEventListener('input', () => store.set('bsky-handle', handleEl.value
 passwordEl.addEventListener('input', savePassword);
 rememberEl.addEventListener('change', () => (rememberEl.checked ? savePassword() : forgetPassword()));
 
-oauthBtn.addEventListener('click', startOAuth);
-handleEl.addEventListener('keydown', e => { if (e.key === 'Enter') startOAuth(); });
-signOutBtn.addEventListener('click', async () => {
+oauthBtn.addEventListener('click', () => (oauth ? signOut() : startOAuth()));
+handleEl.addEventListener('keydown', e => { if (e.key === 'Enter' && !oauth) startOAuth(); });
+
+async function signOut() {
   await forgetSession();
   setAuthMsg('');
   renderAuth();
-});
+}
 
 // A file dropped outside a card would make the browser open it and lose the page.
 for (const type of ['dragover', 'drop']) {
@@ -2435,6 +2464,7 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   rememberEl.checked = !!passwordEl.value;
   oauth = await kvGet('oauth-session');
   await finishOAuth();
+  loadAvatar();
   render();
   renderAuth();
 })();

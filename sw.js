@@ -1,7 +1,7 @@
 // Caches the app shell so Splitter opens offline.
 // Cross-origin requests are never intercepted: posting, identity resolution and link
 // previews must always hit the network, and a cached POST would be a lie.
-const VERSION = 'splitter-v14';
+const VERSION = 'splitter-v15';
 const SHELL = [
   './',
   './index.html',
@@ -36,9 +36,10 @@ self.addEventListener('fetch', event => {
   if (new URL(request.url).origin !== location.origin) return;
 
   // Network-first for the page so a new version lands; the cached copy is the offline fallback.
+  // Bypass the HTTP cache too: Pages sends max-age=600, which otherwise serves the old shell.
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request)
+      fetch(new Request(request, { cache: 'no-store' }))
         .then(res => {
           if (res.ok) {
             const copy = res.clone();

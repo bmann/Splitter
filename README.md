@@ -146,6 +146,9 @@ atproto OAuth. The browser goes to the account's authorization service, you appr
 back signed in. It asks for one narrow permission — create posts, including uploading images — so it
 cannot read your timeline, change your profile, or delete posts.
 
+Once signed in, the header shows your avatar and handle and the button becomes **Logout**. The avatar
+is read once from `public.api.bsky.app` and kept with the session.
+
 A few things are worth knowing:
 
 - The consent screen shows `http://localhost?…` on loopback and the `client-metadata.json` URL on

@@ -92,14 +92,17 @@ offers Resume.
 ## Themes
 
 Atmosphere is the default: a light blue palette that doesn't make Bluesky the product's identity.
-Pick another in the header; the choice is remembered and follows the system light/dark setting.
+Pick another in the header; the choice is remembered. Most themes follow the system light/dark
+setting; Blacksky is black in both.
 
 | Theme | Palette |
 | --- | --- |
 | Atmosphere | light blue, the neutral default |
 | Bluesky | Bluesky blue |
-| Blacksky | Blacksky black and indigo |
+| Blacksky | Blacksky black and green |
 | Mu.Social | Mu.Social pink |
+
+![The Blacksky theme: black background, lime accent](docs/screenshots/blacksky.png)
 
 The four built-ins live in `index.html` so they work from `file://`. Community themes live in
 `themes/`: add a folder and a line in `themes/index.json`, reload, and it appears in the picker. See

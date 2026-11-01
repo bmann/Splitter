@@ -45,20 +45,13 @@
       --shadow: none;
     }
   }
-  /* Blacksky: black and indigo. */
+  /* Blacksky: black in both schemes, with the lime accent from the Blacksky site. */
   html[data-theme="blacksky"] {
-    --bg: #f8faf9; --panel: #fff; --text: #070c0c; --muted: #5f6b6b;
-    --border: #e1e8e4; --accent: #6060e9; --accent-soft: rgba(96, 96, 233, 0.12);
-    --on-accent: #fff; --warn: #c2410c;
-    --shadow: 0 1px 2px rgba(7, 12, 12, 0.06), 0 2px 8px rgba(7, 12, 12, 0.04);
-  }
-  @media (prefers-color-scheme: dark) {
-    html[data-theme="blacksky"] {
-      --bg: #070c0c; --panel: #161e27; --text: #f8faf9; --muted: #9aa8a8;
-      --border: #2a3a3a; --accent: #8a8aff; --accent-soft: rgba(138, 138, 255, 0.16);
-      --on-accent: #0a0a1a; --warn: #ff8a8a;
-      --shadow: none;
-    }
+    color-scheme: dark;
+    --bg: #070c0c; --panel: #16201e; --text: #f8faf9; --muted: #a4b2ad;
+    --border: #55685f; --accent: #d2fc51; --accent-soft: rgba(210, 252, 81, 0.16);
+    --on-accent: #070c0c; --warn: #ff9f7a;
+    --shadow: none;
   }
   /* Mu.Social: the pink from the mu brand palette. */
   html[data-theme="mu"] {
@@ -1719,7 +1712,7 @@ const THEME_TOKENS = ['--bg', '--panel', '--text', '--muted', '--border', '--acc
 const BUILTIN_THEMES = [
   { slug: 'atmosphere', name: 'Atmosphere', signIn: 'Atmosphere', description: 'Light blue, the neutral default.' },
   { slug: 'bluesky', name: 'Bluesky', signIn: 'Bluesky', description: 'Bluesky blue.' },
-  { slug: 'blacksky', name: 'Blacksky', signIn: 'Blacksky', description: 'Blacksky black and indigo.' },
+  { slug: 'blacksky', name: 'Blacksky', signIn: 'Blacksky', description: 'Blacksky black and green.' },
   { slug: 'mu', name: 'Mu.Social', signIn: 'Mu', description: 'Mu.Social pink.' },
 ];
 const themeSelect = document.getElementById('themeSelect');

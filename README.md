@@ -163,8 +163,8 @@ A few things are worth knowing:
   hasn't seen before. The URL is the permission request itself.
 - Sessions last about two weeks. When one expires, Splitter asks you to sign in again.
 - The session belongs to the address you signed in at. Changing the port means signing in again.
-- On an iPhone or iPad, sign in from a Safari tab before adding the app to the home screen. A
-  home-screen app has its own storage and cannot finish the redirect.
+- On an iPhone or iPad, sign in from a Safari tab and post there. A Home Screen app has its own storage,
+  cannot finish the OAuth redirect, and cannot see the Safari session.
 
 **App passwords** still work, and are the only option for a file opened straight from disk. Create
 one under Settings → Privacy and security → App passwords, and make one just for Splitter so you can

@@ -179,6 +179,11 @@
     background: var(--panel); color: var(--text); font: inherit; font-size: 16px;
   }
   textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .md-hint { margin: 8px 2px 0; font-size: 12px; color: var(--muted); }
+  .md-hint code {
+    font: inherit; padding: 1px 4px; border-radius: 4px;
+    background: var(--accent-soft); color: var(--text);
+  }
 
   /* Posts are drawn as a thread: a numbered badge per post, joined by a line. */
   .scroll { flex: 1; overflow-y: auto; padding: 1px; }
@@ -413,6 +418,8 @@
   <div class="col">
     <div class="col-head"><span>Your text</span><span id="total"></span></div>
     <textarea id="input" placeholder="Paste your text here…" autofocus></textarea>
+    <p class="md-hint">Markdown links become real links: <code>[text](https://example.com)</code> posts as
+      “text”. The brackets and address are not part of the post.</p>
     <div class="tags-panel">
       <div class="tags-head">
         <label for="threadTagInput">Tags for every post</label>
@@ -448,8 +455,79 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 const sentences = new Intl.Segmenter(undefined, { granularity: 'sentence' });
 const glen = s => { let n = 0; for (const _ of graphemes.segment(s)) n++; return n; };
 
+// ---- Markdown links ----
+// [label](uri) posts the label with a link facet, so neither the brackets nor the URI reach the
+// record. Only http(s) targets count; escaped brackets and images (![alt](uri)) stay literal, and
+// so does a label too long to fit a post on its own — a bad link is never silently dropped.
+const MD_LINK_SRC = String.raw`(?<![!\\])\[([^\[\]\n]+)\]\(\s*<?(https?:\/\/(?:[^\s()<>]|\([^\s()<>]*\))+)>?(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?\s*\)`;
+const mdLinkRe = () => new RegExp(MD_LINK_SRC, 'gi');
+// A pasted label can carry a newline-free run of spaces; the post shows it as one line of prose.
+const linkLabel = raw => String(raw).replace(/\s+/g, ' ').trim();
+const linkFits = label => { const n = glen(label); return n > 0 && n <= LIMIT; };
+
+// The text a post will carry, plus the link spans inside it as UTF-16 indices into that text.
+function renderLinks(src) {
+  if (!src || !src.includes('](')) return { text: src || '', links: [] };
+  let text = '', at = 0;
+  const links = [];
+  for (const m of src.matchAll(mdLinkRe())) {
+    const label = linkLabel(m[1]);
+    if (!linkFits(label)) continue;
+    text += src.slice(at, m.index);
+    const start = text.length;
+    text += label;
+    links.push({ start, end: text.length, uri: m[2] });
+    at = m.index + m[0].length;
+  }
+  return at ? { text: text + src.slice(at), links } : { text: src, links: [] };
+}
+
+// Same links, cached per post source, so render/post/preview agree on one answer.
+const rendered = new Map();
+function renderPost(src) {
+  const key = src || '';
+  let r = rendered.get(key);
+  if (!r) {
+    r = renderLinks(key);
+    if (rendered.size > 200) rendered.clear();
+    rendered.set(key, r);
+  }
+  return r;
+}
+
+// The splitter sees each link as one placeholder word, so it measures the label and can never
+// cut through a link. tokenize() puts the source back before a post is built.
+const PH = '\uE000';
+const PH_END = '\uE001';
+
+function maskLinks(src) {
+  const found = [];
+  if (!src || !src.includes('](')) return { masked: src || '', found };
+  const masked = src.replace(mdLinkRe(), (raw, label, uri) => {
+    const clean = linkLabel(label);
+    if (!linkFits(clean)) return raw;
+    found.push({ raw, uri, label: clean });
+    return `${PH}${found.length - 1}${PH_END}`;
+  });
+  return { masked, found };
+}
+
 // Turn text into word tokens, each tagged with the kind of break that follows it.
 function tokenize(text) {
+  const { masked, found } = maskLinks(text);
+  const tokens = tokenizePlain(masked);
+  if (!found.length) return tokens;
+  // A link can share a token with the punctuation that follows it ([post](url). has one token),
+  // so put every placeholder back and measure the token as it will be posted.
+  return tokens.map(t => {
+    if (!t.text.includes(PH)) return t;
+    const text = t.text.replace(new RegExp(`${PH}(\\d+)${PH_END}`, 'g'),
+      (_, n) => found[Number(n)].raw);
+    return { ...t, text, len: glen(renderLinks(text).text) };
+  });
+}
+
+function tokenizePlain(text) {
   const tokens = [];
   const paras = text.split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
   paras.forEach((para, pi) => {
@@ -520,6 +598,15 @@ function split(text, limit = LIMIT) {
     if (!best || r.cost < best.cost) best = r;
     if (k >= firstK + 1) break;  // try the minimum post count and one more
   }
+  if (!best) {
+    // Nothing fits — a single unit longer than a post, such as a link label right at the limit.
+    // Chunk by graphemes so the page still splits instead of throwing; this is the only path that
+    // can cut through a markdown link.
+    const chars = [...graphemes.segment(text)].map(g => g.segment);
+    const posts = [];
+    for (let i = 0; i < chars.length; i += limit) posts.push(chars.slice(i, i + limit).join(''));
+    return posts;
+  }
   return best.posts;
 }
 
@@ -589,9 +676,12 @@ const cards = new Map();     // url -> { state: 'loading' | 'ready' | 'empty' | 
 const quotes = new Map();    // url -> { state: 'loading' | 'ready' | 'empty' | 'failed', data, promise, settled }
 const previewsOff = new Set();  // urls whose preview the user dropped
 
-const firstUrl = text => {
+const firstUrl = (text, links) => {
   const m = text.match(URL_RE);
-  return m ? trimUrl(m[0]) : null;
+  const bare = m ? trimUrl(m[0]) : null;
+  const at = bare ? text.indexOf(bare) : Infinity;
+  const link = links?.[0];
+  return link && link.start < at ? link.uri : bare;
 };
 
 function hostOf(uri) {
@@ -724,8 +814,8 @@ async function quoteEmbed(url) {
 }
 
 // The embed for a post: its first URL, else a pinned preview. A bsky.app post becomes a quote.
-async function embedFor(text, i, auth) {
-  const url = firstUrl(text);
+async function embedFor(text, i, auth, links) {
+  const url = firstUrl(text, links);
   if (url && previewsOff.has(url)) return null;
   const source = url || pins[i]?.url || null;
   if (!source) return null;
@@ -733,9 +823,11 @@ async function embedFor(text, i, auth) {
 }
 
 // Spans of text that Bluesky renders as links, tags or mentions, as UTF-16 indices into the
-// post; facets() turns those into the UTF-8 byte ranges the record format wants.
-function segments(text, dids) {
+// post; facets() turns those into the UTF-8 byte ranges the record format wants. Markdown links
+// come first, so a #hashtag or @handle inside a label stays link text.
+function segments(text, dids, links) {
   const spans = [];
+  for (const l of links || []) spans.push({ start: l.start, end: l.end, kind: 'link', uri: l.uri });
   for (const m of text.matchAll(URL_RE)) {
     const uri = trimUrl(m[0]);
     spans.push({ start: m.index, end: m.index + uri.length, kind: 'link', uri });
@@ -762,10 +854,10 @@ function segments(text, dids) {
 }
 
 // Bluesky doesn't auto-link; mark URLs, #tags and resolved @mentions by UTF-8 byte range.
-function facets(text, dids) {
+function facets(text, dids, links) {
   const enc = new TextEncoder();
   const byte = i => enc.encode(text.slice(0, i)).length;
-  return segments(text, dids).map(s => {
+  return segments(text, dids, links).map(s => {
     const index = { byteStart: byte(s.start), byteEnd: byte(s.end) };
     if (s.kind === 'link') {
       return { index, features: [{ $type: 'app.bsky.richtext.facet#link', uri: s.uri }] };
@@ -1242,6 +1334,7 @@ async function postThread() {
   if (renderTimer) render();  // pick up any typing still waiting to re-split
   const posts = finalPosts();
   const tags = tagSets();
+  const links = linkSets();
   if (tags.some(t => t.length > MAX_TAGS)) {
     threadMsg.textContent = `A post can have at most ${MAX_TAGS} tags. Remove one or more tags.`;
     return;
@@ -1250,15 +1343,16 @@ async function postThread() {
   threadMsg.textContent = 'Signing in…';
   try {
     // Set up the thread first, so a sign-in failure has somewhere to be reported.
-    const key = posts.map((p, i) => `${p}\0${tags[i].join('\u0001')}`).join('\0');
+    const key = threadSignature();
     if (!thread || thread.key !== key) {
       thread = {
-        key, posts, tags, refs: [], root: continuation?.root || null,
+        key, posts, tags, links, refs: [], root: continuation?.root || null,
         parent: continuation?.parent || null,
       };
       if (!continuation) history = [];  // a fresh thread, not an extension
     }
     thread.tags = tags;
+    thread.links = links;
     thread.error = null;
     const auth = await getAuth();
     const n = thread.posts.length, done = thread.refs.length;
@@ -1270,9 +1364,10 @@ async function postThread() {
     for (let i = thread.refs.length; i < n; i++) {
       threadMsg.textContent = `Posting ${i + 1} of ${n}…`;
       const text = thread.posts[i];
+      const postLinkSpans = thread.links?.[i];
       const record = { $type: 'app.bsky.feed.post', text, createdAt: new Date().toISOString() };
       const dids = await resolveMentions(text, auth);
-      const f = facets(text, dids);
+      const f = facets(text, dids, postLinkSpans);
       if (f.length) record.facets = f;
       if (thread.tags?.[i]?.length) record.tags = thread.tags[i];
       if (i > 0) {
@@ -1290,7 +1385,7 @@ async function postThread() {
         }
         record.embed = { $type: 'app.bsky.embed.images', images };
       } else {
-        const embed = await embedFor(text, i, auth);
+        const embed = await embedFor(text, i, auth, postLinkSpans);
         if (embed) record.embed = embed;
       }
       const { uri, cid } = await auth.xrpc('com.atproto.repo.createRecord',
@@ -1365,8 +1460,8 @@ function parseTags(raw) {
   return tags;
 }
 
-function bodyTagKeys(text) {
-  return new Set(segments(text, null).filter(s => s.kind === 'tag').map(s => tagKey(s.tag)));
+function bodyTagKeys(text, links) {
+  return new Set(segments(text, null, links).filter(s => s.kind === 'tag').map(s => tagKey(s.tag)));
 }
 
 function effectiveTags(i) {
@@ -1381,17 +1476,23 @@ function effectiveTags(i) {
 // Out-of-band tags become record.tags, not text facets. Tags already present in the body are
 // left to the body facet and are not duplicated in the tags array.
 function outOfBandTags(i) {
-  const present = bodyTagKeys(currentPosts[i] || '');
+  const present = bodyTagKeys(finalPost(i), postLinks(i));
   return effectiveTags(i).filter(t => !present.has(tagKey(t)));
 }
 
+// currentPosts holds what the user wrote, markdown and all; a post is the rendered text plus the
+// link spans inside it. Everything that counts, paints or publishes a post goes through these.
 const MAX_TAGS = 8;  // app.bsky.feed.post.tags maxLength
-const finalPost = i => currentPosts[i] || '';
-const finalPosts = () => currentPosts.slice();
+const finalPost = i => renderPost(currentPosts[i] || '').text;
+const finalPosts = () => currentPosts.map((_, i) => finalPost(i));
+const postLinks = i => renderPost(currentPosts[i] || '').links;
+const linkSets = () => currentPosts.map((_, i) => postLinks(i));
 const tagSets = () => currentPosts.map((_, i) => outOfBandTags(i));
 const threadSignature = () => {
   const tags = tagSets();
-  return finalPosts().map((p, i) => `${p}\0${tags[i].join('\u0001')}`).join('\0');
+  return finalPosts()
+    .map((p, i) => `${p}\0${postLinks(i).map(l => l.uri).join('\u0002')}\0${tags[i].join('\u0001')}`)
+    .join('\0');
 };
 
 function tagChip(tag, onRemove) {
@@ -1485,7 +1586,7 @@ function addPostTag(i, raw) {
   const tags = parseTags(raw);
   if (!tags.length) return;
   const globalKeys = new Set(threadTags.map(tagKey));
-  const present = bodyTagKeys(currentPosts[i] || '');
+  const present = bodyTagKeys(finalPost(i), postLinks(i));
   for (const tag of tags) {
     const key = tagKey(tag);
     if (present.has(key)) continue;  // already a body hashtag, so it stays a facet
@@ -1563,7 +1664,7 @@ function startContinue() {
   const root = t.root || t.refs[0];
   const parent = t.refs[t.refs.length - 1];
   history = [...history, ...t.posts.map((text, i) => ({
-    text, ref: t.refs[i], tags: (t.tags || [])[i] || [],
+    text, ref: t.refs[i], tags: (t.tags || [])[i] || [], links: (t.links || [])[i] || [],
   }))];
   continuation = { root, parent };
   resetComposer();
@@ -1882,10 +1983,10 @@ function scheduleRender(delay = 150) {
 
 // Paint the preview with the same spans that will become facets: links and tags always,
 // mentions once their DID has resolved.
-function richText(el, text, dids) {
+function richText(el, text, dids, links) {
   el.replaceChildren();
   let at = 0;
-  for (const s of segments(text, dids)) {
+  for (const s of segments(text, dids, links)) {
     if (s.start > at) el.append(text.slice(at, s.start));
     if (s.kind === 'mention') {
       const span = document.createElement('span');
@@ -2063,9 +2164,9 @@ function quoteNode(entry) {
 }
 
 // Paint the preview, or explain why there isn't one, for a post that has no images.
-function renderPreview(slot, i, text) {
+function renderPreview(slot, i, text, links) {
   slot.replaceChildren();
-  const url = firstUrl(text);
+  const url = firstUrl(text, links);
   const pinnedUrl = pins[i]?.url || null;
   const shown = url || pinnedUrl;
   if (!shown) return;
@@ -2130,7 +2231,7 @@ function priorCard(entry) {
   card.className = 'post prior';
   card.innerHTML = '<div class="num">✓</div><div class="body"><div class="post-text"></div>' +
     '<div class="post-foot"><span class="ok">Posted</span></div></div>';
-  richText(card.querySelector('.post-text'), entry.text, mentionDids);
+  richText(card.querySelector('.post-text'), entry.text, mentionDids, entry.links);
   wrap.append(card);
   if (entry.tags?.length) {
     const row = document.createElement('div');
@@ -2148,7 +2249,8 @@ function render() {
   clearTimeout(renderTimer);
   renderTimer = null;
   const text = input.value;
-  totalEl.textContent = text.trim() ? `${glen(text.trim())} characters` : '';
+  const display = renderPost(text).text;
+  totalEl.textContent = display.trim() ? `${glen(display.trim())} characters` : '';
   const posts = split(text);
   currentPosts = posts;
   statusEls = [];
@@ -2173,7 +2275,7 @@ function render() {
     postsEl.append(empty);
   }
   posts.forEach((_, i) => {
-    const postText = finalPost(i);
+    const { text: postText, links } = renderPost(currentPosts[i] || '');
     const len = glen(postText);
     const imgs = media[i] || [];
     const card = document.createElement('div');
@@ -2185,7 +2287,7 @@ function render() {
         ${len} / ${LIMIT}</span>
       <span class="actions"><span></span><button class="icon add" title="Add image" aria-label="Add image">${ICON.image}</button></span></div></div>
       <input type="file" accept="image/*" multiple hidden>`;
-    richText(card.querySelector('.post-text'), postText, mentionDids);
+    richText(card.querySelector('.post-text'), postText, mentionDids, links);
     statusEls.push(card.querySelector('.actions span'));
 
     const fileIn = card.querySelector('input[type=file]');
@@ -2212,7 +2314,7 @@ function render() {
     });
 
     // A preview is only possible when the post has no images: images win in the record.
-    if (!imgs.length) renderPreview(card.querySelector('.card-slot'), i, postText);
+    if (!imgs.length) renderPreview(card.querySelector('.card-slot'), i, postText, links);
 
     const wrap = document.createElement('div');
     wrap.className = 'post-wrap';

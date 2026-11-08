@@ -38,6 +38,27 @@ All three become facets that Bluesky renders as links. Typing `@` searches accou
 stores the pick with its DID; hand-typed handles resolve the same way. A handle that doesn't resolve
 stays plain text instead of failing the post.
 
+### Markdown links
+
+Paste text from notes, Obsidian or Notion and its markdown links come out as real links: the label is
+posted and the address becomes a facet, so neither the brackets nor the URL are part of the post.
+
+```text
+you write:  Read [my post](https://bmannconsulting.com/x) today.
+you post:   Read my post today.
+            └─ "my post" links to https://bmannconsulting.com/x
+```
+
+The character count and the splitter both measure the post as it will be published, so a link costs
+its label, not the markdown — and a link is never cut in half between two posts: it moves whole to
+the next one. A markdown link is also the URL the link card (or a quote, for a `bsky.app` post link)
+is built from, and the input shows a reminder of the syntax under the text box.
+
+Anything the app can't turn into a link stays exactly as typed rather than being dropped: images
+(`![alt](url)`), escaped brackets (`\[not a link\]`), addresses without `http(s)://`, malformed
+markdown, and a label longer than a whole post. A `#hashtag` or `@handle` inside a label is link
+text, not a second facet.
+
 ### Tags on every post
 
 ![Thread-wide and per-post tag pills under the post cards](docs/screenshots/tags.png)

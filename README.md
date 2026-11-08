@@ -38,6 +38,13 @@ All three become facets that Bluesky renders as links. Typing `@` searches accou
 stores the pick with its DID; hand-typed handles resolve the same way. A handle that doesn't resolve
 stays plain text instead of failing the post.
 
+Account search — the `@` completion list and the avatar in the header — is powered by
+[**typeahead**](https://typeahead.waow.tech/docs), a community-run AT Protocol account index
+maintained by [@zzstoatzz.io](https://bsky.app/profile/zzstoatzz.io). It asks for nothing but the
+letters you type, and the app identifies itself with an `X-Client` header — keep that header if you
+fork this, because it is how the service tells real apps from smoke tests. See [Credits](#credits)
+for what it runs on.
+
 ### Markdown links
 
 ![Markdown source in the composer beside the rendered post: link labels, a link card, and the syntax reminder](docs/screenshots/markdown-links.png)
@@ -199,9 +206,10 @@ revoke it without touching anything else. Splitter refuses your account password
 
 Everything runs in your browser. Your text, images and credentials go only to Bluesky. Link previews
 are fetched through `cardyb.bsky.app`, the same service Bluesky's own app uses. Handle search goes to
-`typeahead.waow.tech`, a community actor search for atproto, which sees the letters you type after
-`@`; resolving a handle asks `public.api.bsky.app`, and a quoted-post permalink is also resolved
-there, sending only that URL. Your own handle goes to the typeahead once, to load the header avatar. `did:plc` documents come from `plc.directory`. None of them see your
+[`typeahead.waow.tech`](https://typeahead.waow.tech/docs), a community actor search for atproto, which
+sees the letters you type after `@`; resolving a handle asks `public.api.bsky.app`, and a quoted-post
+permalink is also resolved there, sending only that URL. Your own handle goes to the typeahead once,
+to load the header avatar. `did:plc` documents come from `plc.directory`. None of them see your
 posts. The handle is remembered locally. An app password is saved in local storage only if you tick
 "Remember" — any other page on the same address can read it, so leave that off on shared machines.
 OAuth tokens and the signing key live in IndexedDB, never in local storage.
@@ -248,3 +256,18 @@ No build step, no dependencies, no bundler. Edit `index.html` and reload. Two th
   (and likewise for 192; `icon-maskable.svg` is the source for the maskable and Apple touch icons).
 - When `index.html`, the icon set, or a built-in palette changes, bump `VERSION` in `sw.js`, or
   installed copies will keep the old shell until the cache expires.
+
+## Credits
+
+- [Splitter](https://github.com/scottjenson/Splitter) is Scott Jenson's app; this is a fork of it.
+- Account search and the header avatar: [**typeahead**](https://typeahead.waow.tech/docs), a
+  community-run AT Protocol account index. It answers from its own
+  [Tantivy](https://github.com/quickwit-oss/tantivy) full-text index behind a Cloudflare Worker,
+  seeded from verified R2 artifacts and kept fresh from Turso, with Bluesky's appview as an automatic
+  fallback. Unauthenticated and CORS-enabled; maintained by
+  [@zzstoatzz.io](https://bsky.app/profile/zzstoatzz.io), source on
+  [Tangled](https://tangled.org/zzstoatzz.io/typeahead), index health on
+  [stats](https://typeahead.waow.tech/stats).
+- Link cards come from [cardyb](https://cardyb.bsky.app/), Bluesky's card extractor; identity
+  resolution and quoted posts go to `public.api.bsky.app` and
+  [plc.directory](https://plc.directory/).

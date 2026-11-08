@@ -40,6 +40,8 @@ stays plain text instead of failing the post.
 
 ### Markdown links
 
+![Markdown source in the composer beside the rendered post: link labels, a link card, and the syntax reminder](docs/screenshots/markdown-links.png)
+
 Paste text from notes, Obsidian or Notion and its markdown links come out as real links: the label is
 posted and the address becomes a facet, so neither the brackets nor the URL are part of the post.
 

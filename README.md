@@ -53,8 +53,10 @@ you post:   Read my post today.
 
 The character count and the splitter both measure the post as it will be published, so a link costs
 its label, not the markdown — and a link is never cut in half between two posts: it moves whole to
-the next one. A markdown link is also the URL the link card (or a quote, for a `bsky.app` post link)
-is built from, and the input shows a reminder of the syntax under the text box.
+the next one. A markdown link is only a facet: it never becomes the embedded link card or quote,
+because the address is no longer in the post. Paste a bare URL when you want a preview — that is
+still what `cardyb` and the quote lookup are handed. The input shows a reminder of the syntax under
+the text box.
 
 Anything the app can't turn into a link stays exactly as typed rather than being dropped: images
 (`![alt](url)`), escaped brackets (`\[not a link\]`), addresses without `http(s)://`, malformed

@@ -419,7 +419,8 @@
     <div class="col-head"><span>Your text</span><span id="total"></span></div>
     <textarea id="input" placeholder="Paste your text here…" autofocus></textarea>
     <p class="md-hint">Markdown links become real links: <code>[text](https://example.com)</code> posts as
-      “text”. The brackets and address are not part of the post.</p>
+      “text”. The brackets and address are not part of the post, so a bare URL is still what makes a
+      link card.</p>
     <div class="tags-panel">
       <div class="tags-head">
         <label for="threadTagInput">Tags for every post</label>
@@ -676,12 +677,11 @@ const cards = new Map();     // url -> { state: 'loading' | 'ready' | 'empty' | 
 const quotes = new Map();    // url -> { state: 'loading' | 'ready' | 'empty' | 'failed', data, promise, settled }
 const previewsOff = new Set();  // urls whose preview the user dropped
 
-const firstUrl = (text, links) => {
+// The URL that earns a preview: only a bare URL in the post text counts. A markdown link is a
+// facet and nothing more — the label is all that is posted, so there is no address to embed.
+const firstUrl = text => {
   const m = text.match(URL_RE);
-  const bare = m ? trimUrl(m[0]) : null;
-  const at = bare ? text.indexOf(bare) : Infinity;
-  const link = links?.[0];
-  return link && link.start < at ? link.uri : bare;
+  return m ? trimUrl(m[0]) : null;
 };
 
 function hostOf(uri) {
@@ -813,9 +813,9 @@ async function quoteEmbed(url) {
   };
 }
 
-// The embed for a post: its first URL, else a pinned preview. A bsky.app post becomes a quote.
-async function embedFor(text, i, auth, links) {
-  const url = firstUrl(text, links);
+// The embed for a post: its first bare URL, else a pinned preview. A bsky.app post becomes a quote.
+async function embedFor(text, i, auth) {
+  const url = firstUrl(text);
   if (url && previewsOff.has(url)) return null;
   const source = url || pins[i]?.url || null;
   if (!source) return null;
@@ -1385,7 +1385,7 @@ async function postThread() {
         }
         record.embed = { $type: 'app.bsky.embed.images', images };
       } else {
-        const embed = await embedFor(text, i, auth, postLinkSpans);
+        const embed = await embedFor(text, i, auth);
         if (embed) record.embed = embed;
       }
       const { uri, cid } = await auth.xrpc('com.atproto.repo.createRecord',
@@ -2164,9 +2164,9 @@ function quoteNode(entry) {
 }
 
 // Paint the preview, or explain why there isn't one, for a post that has no images.
-function renderPreview(slot, i, text, links) {
+function renderPreview(slot, i, text) {
   slot.replaceChildren();
-  const url = firstUrl(text, links);
+  const url = firstUrl(text);
   const pinnedUrl = pins[i]?.url || null;
   const shown = url || pinnedUrl;
   if (!shown) return;
@@ -2314,7 +2314,7 @@ function render() {
     });
 
     // A preview is only possible when the post has no images: images win in the record.
-    if (!imgs.length) renderPreview(card.querySelector('.card-slot'), i, postText, links);
+    if (!imgs.length) renderPreview(card.querySelector('.card-slot'), i, postText);
 
     const wrap = document.createElement('div');
     wrap.className = 'post-wrap';

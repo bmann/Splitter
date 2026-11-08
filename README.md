@@ -38,6 +38,11 @@ All three become facets that Bluesky renders as links. Typing `@` searches accou
 stores the pick with its DID; hand-typed handles resolve the same way. A handle that doesn't resolve
 stays plain text instead of failing the post.
 
+Pasted markdown links work too: `[my post](https://example.com/x)` is posted as `my post` with the
+link attached — the brackets and the URL never reach the post, and the splitter measures the label,
+so a link is never cut in half. Malformed markdown, image syntax and non-`http(s)` targets stay as
+literal text.
+
 ### Tags on every post
 
 ![Thread-wide and per-post tag pills under the post cards](docs/screenshots/tags.png)
